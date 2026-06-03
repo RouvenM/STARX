@@ -1,8 +1,9 @@
 # STARX
 Spatio-temporal autogression with exogenous variables
+# STARX — Spatio-Temporal AutoRegression with Exogenous Variables
 
 Sparse VAR baseline on Citi Bike station-level demand data (Jersey City / Hoboken).  
-This repository documents the data pipeline, model setup, and forecast evaluation as a foundation for the STARX extension with exogenous variables.
+This repository documents the data pipeline, model setup, and rolling window forecast evaluation as a foundation for the STARX extension with spatial penalties and exogenous variables.
 
 ---
 
@@ -11,8 +12,8 @@ This repository documents the data pipeline, model setup, and forecast evaluatio
 **Source:** [Citi Bike System Data](https://s3.amazonaws.com/tripdata/index.html)  
 **Coverage:** Jersey City / Hoboken, January 2024  
 **Raw trips:** ~50,600 individual rides  
-**Stations:** Top 20 by trip volume  
-**Resolution:** 30-minute intervals → 1,488 half-hours × 20 stations
+**Stations:** Top 6 by trip volume (labeled `area1`–`area6`)  
+**Resolution:** 30-minute intervals → 1,488 half-hours × 6 stations
 
 Data files are not included in this repository. The script downloads them automatically on first run.
 
@@ -33,53 +34,80 @@ Y_t = A_1 Y_{t-1} + A_2 Y_{t-2} + ... + A_p Y_{t-p} + ε_t
 ```
 
 - Penalty: `HLag` — encourages whole lags to drop out before individual coefficients
-- Selection: BIC
-- Standardization: `scale()` fit on training data only, applied before model estimation
+- Initial fit: `selection = "cv"` (time series cross-validation)
+- Rolling window: `selection = "bic"` for computational feasibility
+- Standardization: `scale()` fit on each window separately — no data leakage
 
-### Train / Test Split
+### Rolling Window Evaluation
 
-| Set | Period | Half-hours |
-|-----|--------|-----------|
-| Train | Weeks 1–3 (Jan 1–21) | 1,008 |
-| Test | Week 4 (Jan 22–31) | 336 |
+```
+|←— 672 half-hours (2 weeks) —→| t+1
+                  |←— 672 —→| t+2
+                                  ...
+```
 
-Forecast method: `recursiveforecast(h = 336)` — one model fit, rolled forward over the full test week.
+| Parameter | Value |
+|-----------|-------|
+| Window size | 672 half-hours (2 weeks) |
+| Forecast horizon | h = 1 (30 minutes ahead) |
+| Test points | 816 half-hours |
+| Forecast function | `directforecast(h = 1)` |
+
+Actuals and naive baseline are standardized using the same window parameters (`mu`, `sd`) as the forecast — ensuring all metrics are computed in a consistent standardized space.
 
 ### Baseline
 
-Naive forecast: last observed value carried forward.
+Naive forecast: last observed value within the training window, standardized with window parameters.
 
 ---
 
 ## Results
 
-**Overall improvement over naive: 25.3%**  
-VAR beats naive on 19 out of 20 stations.
+### Cross-Validation Curve
+
+![CV Curve](plots/03_cv_curve.png)
+
+Optimal lambda ≈ 100 (black dashed line). The CV curve is relatively flat between λ = 5 and λ = 100, indicating the model is not highly sensitive to regularization strength in this range. The one-SE lambda (~250) selects a sparser model within one standard deviation of the optimum.
+
+---
+
+### Model Diagnostics — area3
+
+![Diagnostics](plots/08_diagnostics_area3.png)
+
+In-sample fit on the initial training window. The fitted values (red) capture the baseline level but miss most large spikes — consistent with a linear model applied to count data with rare high-demand events. Residuals closely resemble the raw signal, indicating limited explained variance in-sample for this station.
+
+---
+
+### Forecast Accuracy by Station
 
 | Station | MSFE (VAR) | MSFE (Naive) | Improvement |
 |---------|-----------|-------------|-------------|
-| Newport Pkwy | 0.71 | 0.98 | 27.9% |
-| Marshall St & 2 St | 0.80 | 1.08 | 25.5% |
-| Adams St & 2 St | 0.81 | 1.10 | 26.4% |
-| Hoboken Ave at Monmouth | 0.83 | 1.10 | 25.1% |
-| Clinton St & 7 St | 0.86 | 1.22 | 29.5% |
-| Marin Light Rail | 0.87 | 1.21 | 28.1% |
-| 11 St & Washington St | 1.08 | 1.20 | 9.8% |
-| Columbus Park - Clinton | 1.12 | 1.61 | 30.6% |
-| Madison St & 1 St | 1.16 | 1.60 | 27.1% |
-| 8 St & Washington St | 1.32 | 1.33 | 1.0% |
-| Hamilton Park | 1.45 | 1.96 | 26.4% |
-| South Waterfront Walkway | 1.52 | 1.94 | 21.8% |
-| City Hall - Washington St | 1.62 | 2.27 | 28.5% |
-| Exchange Pl | 1.67 | 2.18 | 23.4% |
-| Bergen Ave & Sip Ave | 2.09 | 2.98 | 29.9% |
-| Newport PATH | 2.09 | 2.85 | 26.5% |
-| River St & 1 St | 2.47 | 3.21 | 23.0% |
-| Hoboken Terminal - Hudson St | 2.73 | 2.72 | -0.5% |
-| Grove St PATH | 8.07 | 11.01 | 26.7% |
-| Hoboken Terminal - River St | 8.45 | 12.32 | 31.3% |
+| area2 | 0.5073 | 0.6830 | 25.7% |
+| area1 | 0.5353 | 0.7259 | 26.3% |
+| area6 | 0.6137 | 1.0889 | 43.6% |
+| area3 | 0.7023 | 1.1752 | 40.2% |
+| area4 | 0.7337 | 1.2121 | 39.5% |
+| area5 | 0.7473 | 1.1386 | 34.4% |
+| **overall** | **0.6400** | **1.0039** | **36.3%** |
 
-MSFE values are in original scale (trips²). The two highest-MSFE stations are the busiest hubs in the network; their absolute error is larger but relative improvement is consistent with the rest.
+MSFE values are in standardized scale. VAR outperforms the naive baseline on all 6 stations.
+
+---
+
+### Rolling Window Forecast Errors
+
+![Forecast Errors](plots/05_forecast_errors.png)
+
+Errors are centered around zero across all six stations — no systematic bias. Large positive outliers dominate, meaning the model consistently underestimates demand spikes. This is expected behavior for a linear VAR without calendar or weather information. `area4` shows the largest outliers, suggesting more irregular demand patterns at that station.
+
+---
+
+### Forecast vs. Actual — area3
+
+![Forecast vs Actual](plots/06_forecast_vs_actual_area3.png)
+
+The 1-step-ahead forecast (blue) tracks the daily demand cycle well but undershoots sharp peaks. The model captures the general level and periodicity of demand; extreme values remain difficult to predict without exogenous information.
 
 ---
 
@@ -89,8 +117,13 @@ MSFE values are in original scale (trips²). The two highest-MSFE stations are t
 STARX/
 ├── README.md
 ├── Literature/
-└── R/
-    └── citibike_sparseVAR_split.R
+├── R/
+│   └── citibike_sparseVAR_rolling.R
+└── plots/
+    ├── 03_cv_curve.png
+    ├── 05_forecast_errors.png
+    ├── 06_forecast_vs_actual_area3.png
+    └── 08_diagnostics_area3.png
 ```
 
 ---
@@ -102,5 +135,4 @@ install.packages(c("bigtime", "ggplot2", "dplyr", "tidyr", "lubridate", "openxls
 ```
 
 R version used: 4.4.1
-
 
