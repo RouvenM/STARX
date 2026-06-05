@@ -1,6 +1,5 @@
 # STARX
 Spatio-temporal autogression with exogenous variables
-# STARX — Spatio-Temporal AutoRegression with Exogenous Variables
 
 Sparse VAR baseline on Citi Bike station-level demand data (Jersey City / Hoboken).  
 This repository documents the data pipeline, model setup, and rolling window forecast evaluation as a foundation for the STARX extension with spatial penalties and exogenous variables.
@@ -97,11 +96,7 @@ MSFE values are in standardized scale. VAR outperforms the naive baseline on all
 
 ### Rolling Window Forecast Errors
 
-![Forecast Errors](plots/05_forecast_errors.png)
 
-Errors are centered around zero across all six stations — no systematic bias. Large positive outliers dominate, meaning the model consistently underestimates demand spikes. This is expected behavior for a linear VAR without calendar or weather information. `area4` shows the largest outliers, suggesting more irregular demand patterns at that station.
-
----
 
 ### Forecast vs. Actual — area3
 
