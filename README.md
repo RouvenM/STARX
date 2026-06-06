@@ -67,15 +67,6 @@ Naive forecast: last observed value within the training window, standardized wit
 
 Hourly trip counts for the top 4 stations across January 2024. All stations show a clear daily rhythm with morning and evening peaks. area1 and area2 are the busiest stations, reaching up to 40 trips/hour. The regular weekly pattern (lower demand on weekends) is visible throughout.
 
----
-
-### Lag Matrix
-
-![Lag Matrix](plots/plot_lagmatrix.png)
-
-The lag matrix shows that BIC selects only Lag 1 for all station pairs — meaning the most recent observation is sufficient to explain demand at the next hour. No higher-order lags are retained, consistent with the strong autocorrelation structure visible in the raw series.
-
----
 
 ### Model Diagnostics — area1
 
