@@ -1,8 +1,8 @@
 # STARX
 Spatio-temporal autogression with exogenous variables
 
-Sparse VAR baseline on Citi Bike station-level demand data (Jersey City / Hoboken).  
-This repository documents the data pipeline, model setup, and rolling window forecast evaluation as a foundation for the STARX extension with spatial penalties and exogenous variables.
+Sparse VAR baseline on Citi Bike station-level demand data.  
+This repository documents the data pipeline, model setup, and rolling window forecast evaluation as a foundation for the STARX extension.
 
 ---
 
@@ -11,8 +11,8 @@ This repository documents the data pipeline, model setup, and rolling window for
 **Source:** [Citi Bike System Data](https://s3.amazonaws.com/tripdata/index.html)  
 **Coverage:** Jersey City / Hoboken, January 2024  
 **Raw trips:** ~50,600 individual rides  
-**Stations:** Top 6 by trip volume (labeled `area1`–`area6`)  
-**Resolution:** 30-minute intervals → 1,488 half-hours × 6 stations
+**Stations:** Top 4 by trip volume (labeled `area1`–`area4`)  
+**Resolution:** 1-hour intervals → 744 hours × 4 stations
 
 Data files are not included in this repository. The script downloads them automatically on first run.
 
@@ -22,7 +22,7 @@ Data files are not included in this repository. The script downloads them automa
 
 ### Time Series Construction
 
-Each ride is assigned to its 30-minute interval via `floor_date()`. Trip counts are aggregated per station and interval; missing combinations (zero rides) are filled with 0 to produce a complete rectangular matrix.
+Each ride is assigned to its hourly interval via `floor_date()`. Trip counts are aggregated per station and interval; missing combinations (zero rides) are filled with 0 to produce a complete rectangular matrix. Hourly aggregation reduces noise compared to 30-minute intervals and produces a cleaner signal for VAR estimation.
 
 ### Model
 
@@ -33,23 +33,22 @@ Y_t = A_1 Y_{t-1} + A_2 Y_{t-2} + ... + A_p Y_{t-p} + ε_t
 ```
 
 - Penalty: `HLag` — encourages whole lags to drop out before individual coefficients
-- Initial fit: `selection = "cv"` (time series cross-validation)
-- Rolling window: `selection = "bic"` for computational feasibility
+- Selection: `bic` throughout (CV used for initial diagnostics only)
 - Standardization: `scale()` fit on each window separately — no data leakage
 
 ### Rolling Window Evaluation
 
 ```
-|←— 672 half-hours (2 weeks) —→| t+1
-                  |←— 672 —→| t+2
-                                  ...
+|←— 336 hours (2 weeks) —→| t+1
+            |←— 336 —→| t+2
+                            ...
 ```
 
 | Parameter | Value |
 |-----------|-------|
-| Window size | 672 half-hours (2 weeks) |
-| Forecast horizon | h = 1 (30 minutes ahead) |
-| Test points | 816 half-hours |
+| Window size | 336 hours (2 weeks) |
+| Forecast horizon | h = 1 (1 hour ahead) |
+| Test points | 408 hours |
 | Forecast function | `directforecast(h = 1)` |
 
 Actuals and naive baseline are standardized using the same window parameters (`mu`, `sd`) as the forecast — ensuring all metrics are computed in a consistent standardized space.
@@ -62,47 +61,49 @@ Naive forecast: last observed value within the training window, standardized wit
 
 ## Results
 
-### Cross-Validation Curve
+### Raw Time Series
 
-![CV Curve](plots/03_cv_curve.png)
+![Series](plots/plot_series.png)
 
-Optimal lambda ≈ 100 (black dashed line). The CV curve is relatively flat between λ = 5 and λ = 100, indicating the model is not highly sensitive to regularization strength in this range. The one-SE lambda (~250) selects a sparser model within one standard deviation of the optimum.
+Hourly trip counts for the top 4 stations across January 2024. All stations show a clear daily rhythm with morning and evening peaks. area1 and area2 are the busiest stations, reaching up to 40 trips/hour. The regular weekly pattern (lower demand on weekends) is visible throughout.
 
 ---
 
-### Model Diagnostics — area3
+### Lag Matrix
 
-![Diagnostics](plots/08_diagnostics_area3.png)
+![Lag Matrix](plots/plot_lagmatrix.png)
 
-In-sample fit on the initial training window. The fitted values (red) capture the baseline level but miss most large spikes — consistent with a linear model applied to count data with rare high-demand events. Residuals closely resemble the raw signal, indicating limited explained variance in-sample for this station.
+The lag matrix shows that BIC selects only Lag 1 for all station pairs — meaning the most recent observation is sufficient to explain demand at the next hour. No higher-order lags are retained, consistent with the strong autocorrelation structure visible in the raw series.
+
+---
+
+### Model Diagnostics — area1
+
+![Diagnostics](plots/plot_diagnostics.png)
+
+In-sample fit on the initial 2-week training window. The fitted values (red) follow the observed signal (black) closely — daily peaks and nighttime lows are well captured. Residuals are centered around zero and substantially smaller than the raw signal, indicating good in-sample fit.
 
 ---
 
 ### Forecast Accuracy by Station
 
-| Station | MSFE (VAR) | MSFE (Naive) | Improvement |
-|---------|-----------|-------------|-------------|
-| area2 | 0.5073 | 0.6830 | 25.7% |
-| area1 | 0.5353 | 0.7259 | 26.3% |
-| area6 | 0.6137 | 1.0889 | 43.6% |
-| area3 | 0.7023 | 1.1752 | 40.2% |
-| area4 | 0.7337 | 1.2121 | 39.5% |
-| area5 | 0.7473 | 1.1386 | 34.4% |
-| **overall** | **0.6400** | **1.0039** | **36.3%** |
+| Station | MSFE (VAR) | MSFE (Naive) | Improvement | MAE (VAR) |
+|---------|-----------|-------------|-------------|-----------|
+| area1 | 0.5630 | 0.6201 | 9.2% | 0.4990 |
+| area2 | 0.5782 | 0.7464 | 22.5% | 0.4570 |
+| area4 | 0.6225 | 0.8882 | 29.9% | 0.5675 |
+| area3 | 0.6345 | 1.0171 | 37.6% | 0.5394 |
+| **overall** | **0.5996** | **0.8180** | **26.7%** | **0.5157** |
 
-MSFE values are in standardized scale. VAR outperforms the naive baseline on all 6 stations.
+MSFE and MAE values are in standardized scale. VAR outperforms the naive baseline on all 4 stations.
 
 ---
 
-### Rolling Window Forecast Errors
+### Forecast vs. Actual — area1
 
+![Forecast vs Actual](plots/plot_forecast.png)
 
-
-### Forecast vs. Actual — area3
-
-![Forecast vs Actual](plots/06_forecast_vs_actual_area3.png)
-
-The 1-step-ahead forecast (blue) tracks the daily demand cycle well but undershoots sharp peaks. The model captures the general level and periodicity of demand; extreme values remain difficult to predict without exogenous information.
+The 1-step-ahead forecast (blue) tracks the actual demand (black) closely across the full test period. Daily peaks and nighttime lows are well reproduced. 
 
 ---
 
@@ -113,12 +114,12 @@ STARX/
 ├── README.md
 ├── Literature/
 ├── R/
-│   └── citibike_sparseVAR_rolling.R
+│   └── citibike_sparseVAR_rolling_v2.R
 └── plots/
-    ├── 03_cv_curve.png
-    ├── 05_forecast_errors.png
-    ├── 06_forecast_vs_actual_area3.png
-    └── 08_diagnostics_area3.png
+    ├── plot_series.png
+    ├── plot_lagmatrix.png
+    ├── plot_diagnostics.png
+    └── plot_forecast.png
 ```
 
 ---
@@ -130,4 +131,3 @@ install.packages(c("bigtime", "ggplot2", "dplyr", "tidyr", "lubridate", "openxls
 ```
 
 R version used: 4.4.1
-
