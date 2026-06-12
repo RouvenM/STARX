@@ -33,7 +33,7 @@ Y_t = A_1 Y_{t-1} + A_2 Y_{t-2} + ... + A_p Y_{t-p} + ε_t
 ```
 
 - Penalty: `HLag` — encourages whole lags to drop out before individual coefficients
-- Selection: `bic` throughout (CV used for initial diagnostics only)
+- Selection: `bic` 
 - Standardization: `scale()` fit on each window separately — no data leakage
 
 ### Rolling Window Evaluation
