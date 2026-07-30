@@ -1,124 +1,101 @@
-# STARX
-Spatio-temporal autogression with exogenous variables
+# HLag + Fusion-Penalty für bigtime
 
-Sparse VAR baseline on Citi Bike station-level demand data.  
-This repository documents the data pipeline, model setup, and rolling window forecast evaluation as a foundation for the STARX extension.
+Erweiterung des [bigtime](https://github.com/ineswilms/bigtime) R-Pakets
+(Nicholson, Wilms, Bien, Matteson 2020, JMLR — HLag-Schätzer) um einen zusätzlichen **Fusions-Strafterm** auf benachbarte
+Lag-Koeffizienten.
+Der Fusionsterm entspricht strukturell der Group-Fused-Lasso-Strafe
+(Bleakley & Vert, 2011), hier entlang der Lag- statt der Zeitachse.
 
----
-
-## Data
-
-**Source:** [Citi Bike System Data](https://s3.amazonaws.com/tripdata/index.html)  
-**Coverage:** Jersey City / Hoboken, January 2024  
-**Raw trips:** ~50,600 individual rides  
-**Stations:** Top 4 by trip volume (labeled `area1`–`area4`)  
-**Resolution:** 1-hour intervals → 744 hours × 4 stations
-
-Data files are not included in this repository. The script downloads them automatically on first run.
-
----
-
-## Method
-
-### Time Series Construction
-
-Each ride is assigned to its hourly interval via `floor_date()`. Trip counts are aggregated per station and interval; missing combinations (zero rides) are filled with 0 to produce a complete rectangular matrix. Hourly aggregation reduces noise compared to 30-minute intervals and produces a cleaner signal for VAR estimation.
-
-### Model
-
-Sparse VAR with hierarchical lag penalty (HLag) from the [`bigtime`](https://github.com/ineswilms/bigtime) package:
+## Verzeichnisstruktur
 
 ```
-Y_t = A_1 Y_{t-1} + A_2 Y_{t-2} + ... + A_p Y_{t-p} + ε_t
+R/
+└── hlag_fusion.R                # alle Funktionen, siehe Funktionsreferenz unten
 ```
 
-- Penalty: `HLag` — encourages whole lags to drop out before individual coefficients
-- Selection: `bic` 
-- Standardization: `scale()` fit on each window separately — no data leakage
-
-### Rolling Window Evaluation
-
-```
-|←— 336 hours (2 weeks) —→| t+1
-            |←— 336 —→| t+2
-                            ...
-```
-
-| Parameter | Value |
-|-----------|-------|
-| Window size | 336 hours (2 weeks) |
-| Forecast horizon | h = 1 (1 hour ahead) |
-| Test points | 408 hours |
-| Forecast function | `directforecast(h = 1)` |
-
-Actuals and naive baseline are standardized using the same window parameters (`mu`, `sd`) as the forecast — ensuring all metrics are computed in a consistent standardized space.
-
-### Baseline
-
-Naive forecast: last observed value within the training window, standardized with window parameters.
-
----
-
-## Results
-
-### Raw Time Series
-
-![Series](plots/plot_series.png)
-
-Hourly trip counts for the top 4 stations across January 2024. All stations show a clear daily rhythm with morning and evening peaks. area1 and area2 are the busiest stations, reaching up to 40 trips/hour. The regular weekly pattern (lower demand on weekends) is visible throughout.
-
-
-### Model Diagnostics — area1
-
-![Diagnostics](plots/plot_diagnostics.png)
-
-In-sample fit on the initial 2-week training window. The fitted values (red) follow the observed signal (black) closely — daily peaks and nighttime lows are well captured. Residuals are centered around zero and substantially smaller than the raw signal, indicating good in-sample fit.
-
----
-
-### Forecast Accuracy by Station
-
-| Station | MSFE (VAR) | MSFE (Naive) | Improvement | MAE (VAR) |
-|---------|-----------|-------------|-------------|-----------|
-| area1 | 0.5630 | 0.6201 | 9.2% | 0.4990 |
-| area2 | 0.5782 | 0.7464 | 22.5% | 0.4570 |
-| area4 | 0.6225 | 0.8882 | 29.9% | 0.5675 |
-| area3 | 0.6345 | 1.0171 | 37.6% | 0.5394 |
-| **overall** | **0.5996** | **0.8180** | **26.7%** | **0.5157** |
-
-MSFE and MAE values are in standardized scale. VAR outperforms the naive baseline on all 4 stations.
-
----
-
-### Forecast vs. Actual — area1
-
-![Forecast vs Actual](plots/plot_forecast.png)
-
-The 1-step-ahead forecast (blue) tracks the actual demand (black) closely across the full test period. Daily peaks and nighttime lows are well reproduced. 
-
----
-
-## Repository Structure
-
-```
-STARX/
-├── README.md
-├── Literature/
-├── R/
-│   └── citibike_sparseVAR_rolling_v2.R
-└── plots/
-    ├── plot_series.png
-    ├── plot_lagmatrix.png
-    ├── plot_diagnostics.png
-    └── plot_forecast.png
-```
-
----
-
-## Dependencies
+## Verwendung
 
 ```r
-install.packages(c("bigtime", "ggplot2", "dplyr", "tidyr", "lubridate", "openxlsx"))
+source("R/hlag_fusion.R")
+
+# Y: T x k Matrix von (standardisierten) Zeitreihen
+fit <- fit_hlag_fusion_var(
+  Y, p = 5,
+  lambda1 = 0.05,      # HLag-Staerke
+  lambda2 = 0.05,      # Fusions-Staerke
+  alpha_decay = 0.5,   # Distanzabfall der Fusionsgewichte
+  adaptive = FALSE     # TRUE fuer datengetriebene Gewichte statt fester exp(-alpha)-Gewichte
+)
 ```
 
-R version used: 4.4.1
+## bigtime-Original vs. unsere Erweiterung
+
+**Teil A** Entspricht `bigtime::src/hvar.cpp`,
+Funktionen `proxcppelem` und `prox2`. R-Nachbildung 
+
+- `prox_hlag_vec(x, lambda)` — Proximaloperator für eine einzelne
+  (Zielreihe i, Quellreihe j)-Kombination. `x` ist ein Vektor der Länge `p`
+  (Koeffizienten Lag 1 bis Lag p). Entspricht `proxcppelem`.
+- `prox_hlag_row(Phi_i, lambda1)` — wendet `prox_hlag_vec` unabhängig auf
+  jede Spalte (Quellreihe j) einer `p x k`-Koeffizientenmatrix an. Entspricht
+  `prox2`.
+
+**Teil B** Fusions-Proximaloperator für
+die Kettenfusion benachbarter Lags (Group-Fused-Lasso entlang der Lag-Achse). Gelöst via ADMM, da wir eine Kettenstruktur im Gegensatz zur genesteten HLag-Struktur haben.
+- `build_diff_operator(p)` — baut eine `(p-1) x p`-Matrix `D`, sodass
+  `D %*% Phi_i` für jedes Lag-Paar `(l, l+1)` den Unterschied
+  `Phi_i^(l+1) - Phi_i^(l)` liefert.
+- `prox_fusion_row(V, lambda2, weights, D, ...)` — löst den Proximaloperator  
+  der Kettenfusionsstrafe über ein internes ADMM-Verfahren.
+
+**Teil C** statt eines festen, nur vom Lag-Abstand abhängigen Gewichts wird zuerst eine
+schnelle Ridge-Vorabschätzung berechnet, aus deren Lag-zu-Lag-Differenzen
+ein individuelles Gewicht je Zielgleichung und Lag-Paar abgeleitet wird.
+
+- `ridge_prelim_row(Zfull, y_i, p, k, ridge_lambda)` — reine
+  Ridge-Regression (kein HLag, keine Fusion), nur zur Berechnung der
+  adaptiven Gewichte verwendet
+- `adaptive_fusion_weights(Phi_prelim, alpha_decay, weight_eps)` —
+  berechnet für jedes Lag-Paar `(l, l+1)` ein Gewicht
+  `w_l = exp(-alpha) / (||Phi_prelim^(l) - Phi_prelim^(l+1)||_2 + eps)`:
+  kleiner Unterschied in der Vorabschätzung → größeres Gewicht → stärkerer
+  Zwang zur Fusion.
+
+**Teil D** Verbindet Teil A (HLag) und
+Teil B (Fusion), da die Summe beider Strafterme keinen gemeinsamen
+geschlossenen Proximaloperator besitzt, jede der beiden Strafen einzeln
+aber effizient lösbar ist.
+
+- `prox_combined_row(V, lambda1, lambda2, weights, D, ...)` — berechnet den
+  Proximaloperator von `lambda1 * HLag + lambda2 * Fusion` über Dykstras
+  Algorithmus (alternierende Projektionen mit Korrekturtermen). Dies ist im
+  Vergleich zu bigtimes Original die einzige Stelle, an der sich der
+  Algorithmus tatsächlich unterscheidet: In bigtimes `FistaElem` wird an
+  dieser Stelle nur `prox2` (entspricht `prox_hlag_row`) aufgerufen.
+
+**Teil E** Entspricht
+bigtimes `FistaElem`/`HVARElemAlgcpp`: Datenaufbau, Schrittweite,
+beschleunigter Gradientenabstieg, Zeilen-Entkopplung über Gleichungen. Neu
+ist ausschließlich die Gewichts-Weiche (fest vs. adaptiv) und der Aufruf
+von `prox_combined_row()` statt eines reinen `prox_hlag_row()`-Aufrufs im
+Prox-Schritt.
+
+- `fit_hlag_fusion_var(Y, p, lambda1, lambda2, alpha_decay, adaptive, ...)` —
+  zeilenweise beschleunigte proximale Gradientenmethode (FISTA). Gibt ein
+  Array der Dimension `p x k x k` zurück (`Phi[lag, Quellreihe j,
+  Zielgleichung i]`); das Attribut `weights_used` enthält die tatsächlich
+  verwendeten Gewichte je Lag-Paar und Zielgleichung.
+
+
+
+
+## Referenzen
+
+- Nicholson, W. B., Wilms, I., Bien, J., & Matteson, D. S. (2020).
+  High-dimensional forecasting via interpretable vector autoregression.
+  *Journal of Machine Learning Research*, 21(166), 1-52.
+- Jenatton, R., Mairal, J., Obozinski, G., & Bach, F. (2011).
+  Proximal methods for hierarchical sparse coding.
+  *Journal of Machine Learning Research*, 12, 2297-2334.
+- Bleakley, K., & Vert, J. P. (2011). The group fused lasso for multiple
+  change-point detection. *arXiv:1106.4199*.
