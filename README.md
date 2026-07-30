@@ -21,17 +21,16 @@ source("R/hlag_fusion.R")
 # Y: T x k Matrix von (standardisierten) Zeitreihen
 fit <- fit_hlag_fusion_var(
   Y, p = 5,
-  lambda1 = 0.05,      # HLag-Staerke
-  lambda2 = 0.05,      # Fusions-Staerke
+  lambda1 = 0.05,      # HLag-Stärke
+  lambda2 = 0.05,      # Fusions-Stärke
   alpha_decay = 0.5,   # Distanzabfall der Fusionsgewichte
-  adaptive = FALSE     # TRUE fuer datengetriebene Gewichte statt fester exp(-alpha)-Gewichte
+  adaptive = FALSE     # TRUE für datengetriebene Gewichte statt fester exp(-alpha)-Gewichte
 )
 ```
 
 ## bigtime-Original vs. unsere Erweiterung
 
-**Teil A** Entspricht `bigtime::src/hvar.cpp`,
-Funktionen `proxcppelem` und `prox2`. R-Nachbildung 
+Funktionen `proxcppelem` und `prox2` entsprechen `bigtime::src/hvar.cpp`, R-Nachbildung 
 
 - `prox_hlag_vec(x, lambda)` — Proximaloperator für eine einzelne
   (Zielreihe i, Quellreihe j)-Kombination. `x` ist ein Vektor der Länge `p`
@@ -40,15 +39,14 @@ Funktionen `proxcppelem` und `prox2`. R-Nachbildung
   jede Spalte (Quellreihe j) einer `p x k`-Koeffizientenmatrix an. Entspricht
   `prox2`.
 
-**Teil B** Fusions-Proximaloperator für
-die Kettenfusion benachbarter Lags (Group-Fused-Lasso entlang der Lag-Achse). Gelöst via ADMM, da wir eine Kettenstruktur im Gegensatz zur genesteten HLag-Struktur haben.
+Fusions-Proximaloperator für die Kettenfusion benachbarter Lags (Group-Fused-Lasso entlang der Lag-Achse). Gelöst via ADMM, da wir eine Kettenstruktur im Gegensatz zur genesteten HLag-Struktur haben.
 - `build_diff_operator(p)` — baut eine `(p-1) x p`-Matrix `D`, sodass
   `D %*% Phi_i` für jedes Lag-Paar `(l, l+1)` den Unterschied
   `Phi_i^(l+1) - Phi_i^(l)` liefert.
 - `prox_fusion_row(V, lambda2, weights, D, ...)` — löst den Proximaloperator  
   der Kettenfusionsstrafe über ein internes ADMM-Verfahren.
 
-**Teil C** statt eines festen, nur vom Lag-Abstand abhängigen Gewichts wird zuerst eine
+Statt eines festen, nur vom Lag-Abstand abhängigen Gewichts wird zuerst eine
 schnelle Ridge-Vorabschätzung berechnet, aus deren Lag-zu-Lag-Differenzen
 ein individuelles Gewicht je Zielgleichung und Lag-Paar abgeleitet wird.
 
@@ -61,8 +59,7 @@ ein individuelles Gewicht je Zielgleichung und Lag-Paar abgeleitet wird.
   kleiner Unterschied in der Vorabschätzung → größeres Gewicht → stärkerer
   Zwang zur Fusion.
 
-**Teil D** Verbindet Teil A (HLag) und
-Teil B (Fusion), da die Summe beider Strafterme keinen gemeinsamen
+Verbindung von HLAG und Fusion da die Summe beider Strafterme keinen gemeinsamen
 geschlossenen Proximaloperator besitzt, jede der beiden Strafen einzeln
 aber effizient lösbar ist.
 
@@ -73,7 +70,7 @@ aber effizient lösbar ist.
   Algorithmus tatsächlich unterscheidet: In bigtimes `FistaElem` wird an
   dieser Stelle nur `prox2` (entspricht `prox_hlag_row`) aufgerufen.
 
-**Teil E** Entspricht
+
 bigtimes `FistaElem`/`HVARElemAlgcpp`: Datenaufbau, Schrittweite,
 beschleunigter Gradientenabstieg, Zeilen-Entkopplung über Gleichungen. Neu
 ist ausschließlich die Gewichts-Weiche (fest vs. adaptiv) und der Aufruf
