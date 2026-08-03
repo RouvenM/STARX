@@ -4,7 +4,7 @@ Erweiterung des [bigtime](https://github.com/ineswilms/bigtime) R-Pakets
 (Nicholson, Wilms, Bien, Matteson 2020, JMLR — HLag-Schätzer) um einen zusätzlichen **Fusions-Strafterm** auf benachbarte
 Lag-Koeffizienten.
 Der Fusionsterm entspricht strukturell der Group-Fused-Lasso-Strafe
-(Bleakley & Vert, 2011), hier entlang der Lag- statt der Zeitachse.
+(Bleakley & Vert, 2011), hier entlang der Lag- bzw. Zeitachse, aber nicht der spatial Dimension.
 
 ## Verzeichnisstruktur
 
