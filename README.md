@@ -23,8 +23,6 @@ fit <- fit_hlag_fusion_var(
   Y, p = 5,
   lambda1 = 0.05,      # HLag-Stärke
   lambda2 = 0.05,      # Fusions-Stärke
-  alpha_decay = 0.5,   # Distanzabfall der Fusionsgewichte
-  adaptive = FALSE     # TRUE für datengetriebene Gewichte statt fester exp(-alpha)-Gewichte
 )
 ```
 
