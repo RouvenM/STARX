@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <numeric>      // std::iota
 
-// [[Rcpp::plugins(cpp11)]]
+// [[Rcpp::plugins(cpp14)]]
 // [[Rcpp::depends(RcppArmadillo)]]
 
 using namespace Rcpp;
