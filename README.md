@@ -15,21 +15,12 @@ install.packages(c("bigtime", "Rcpp", "devtools"))
 You can source the required R and C++ functions directly into your R session from this GitHub repository without installing a full R package:
 
 ```R
-# 1. Load required libraries
+# Load required libraries
 library(Rcpp)
 library(devtools)
 
-# 2. Source R helper functions from bigtime
-source_url("https://raw.githubusercontent.com/RouvenM/STARX/main/R/diagnostics.R")
-source_url("https://raw.githubusercontent.com/RouvenM/STARX/main/R/hvaralgorithms.R")
-
-# 3. Download, compile and load C++ routines from GitHub
-tmp_cpp <- tempfile(fileext = ".cpp")
-download.file("https://raw.githubusercontent.com/RouvenM/STARX/main/src/hvar.cpp", tmp_cpp, quiet = TRUE)
-sourceCpp(tmp_cpp)
-
-# 4. Load modified main R functions
-source_url("https://raw.githubusercontent.com/RouvenM/STARX/main/R/hvar.R")
+# Load all required R and C++ functions 
+source_url("https://raw.githubusercontent.com/RouvenM/STARX/main/R/load_all.R")
 ```
 
 ## Reproducible Examples (Testing LagFused Penalty)
@@ -232,3 +223,4 @@ plot_cv(fit_cv_p4)
 
 # Visualization 2: Lag-Matrix Heatmap
 lagmatrix(fit = fit_cv_p4, returnplot = TRUE)
+
