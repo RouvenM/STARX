@@ -18,7 +18,7 @@ for (file in r_files) {
 }
 
 cpp_files <- c(
-  "src/RccpExports.cpp", 
+  "src/simVAR.cpp", 
   "src/hvar.cpp"
 )
 
