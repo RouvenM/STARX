@@ -7,9 +7,10 @@ base_url <- "https://raw.githubusercontent.com/RouvenM/STARX/main/"
 
 r_files <- c(
   "R/diagnostics.R",
+  "R/hvar.R", 
   "R/hvaralgorithms.R", 
   "R/plot_cv.R", 
-  "R/hvar.R"
+  "R/simVAR.R"
 )
 
 message("Load R scripts...")
