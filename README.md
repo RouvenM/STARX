@@ -1,96 +1,76 @@
-# HLag + Fusion-Penalty für bigtime
+# Custom bigtime Functions
 
-Erweiterung des [bigtime](https://github.com/ineswilms/bigtime) R-Pakets
-(Nicholson, Wilms, Bien, Matteson 2020, JMLR — HLag-Schätzer) um einen zusätzlichen **Fusions-Strafterm** auf benachbarte
-Lag-Koeffizienten.
-Der Fusionsterm entspricht strukturell der Group-Fused-Lasso-Strafe
-(Bleakley & Vert, 2011), hier entlang der Lag- bzw. Zeitachse, aber nicht der spatial Dimension.
+This repository contains modified R and C++ functions adapted from the `bigtime` package, specifically featuring custom implementation for the `LagFused` penalty.
 
-## Verzeichnisstruktur
+## Prerequisites
 
-```
-R/
-└── hlag_fusion.R                # alle Funktionen, siehe Funktionsreferenz unten
+Make sure you have the following R packages installed before loading the functions:
+
+```R
+install.packages(c("bigtime", "Rcpp", "devtools"))
 ```
 
-## Verwendung
+## How to Load the Functions
 
-```r
-source("R/hlag_fusion.R")
+You can source the required R and C++ functions directly into your R session from this GitHub repository without installing a full R package:
 
-# Y: T x k Matrix von (standardisierten) Zeitreihen
-fit <- fit_hlag_fusion_var(
-  Y, p = 5,
-  lambda1 = 0.05,      # HLag-Stärke
-  lambda2 = 0.05,      # Fusions-Stärke
-)
+```R
+# 1. Load required libraries
+#library(bigtime)
+library(Rcpp)
+library(devtools)
+
+# 2. Source R helper functions from bigtime
+source_url("[https://raw.githubusercontent.com/RouvenM/STARX/main/R/diagnostics.R](https://raw.githubusercontent.com/RouvenM/STARX/main/R/diagnostics.R)")
+
+# 3. Compile and load C++ routines directly from GitHub
+sourceCpp("[https://raw.githubusercontent.com/RouvenM/STARX/main/src/hvar.cpp](https://raw.githubusercontent.com/RouvenM/STARX/main/src/hvar.cpp)")
+
+# 4. Load modified main R functions
+source_url("[https://raw.githubusercontent.com/RouvenM/STARX/main/R/hvar.R](https://raw.githubusercontent.com/RouvenM/STARX/main/R/hvar.R)")
 ```
 
-## bigtime-Original vs. unsere Erweiterung
+## Reproducible Example (Testing LagFused Penalty)
 
-Funktionen `proxcppelem` und `prox2` entsprechen `bigtime::src/hvar.cpp`, R-Nachbildung 
+Below is a self-contained test script verifying that higher values of `lambda` lead to increased row fusion between coefficient matrices $\Phi^{(1)}$ and $\Phi^{(2)}$ in a $\text{VAR}(2)$ model.
 
-- `prox_hlag_vec(x, lambda)` — Proximaloperator für eine einzelne
-  (Zielreihe i, Quellreihe j)-Kombination. `x` ist ein Vektor der Länge `p`
-  (Koeffizienten Lag 1 bis Lag p). Entspricht `proxcppelem`.
-- `prox_hlag_row(Phi_i, lambda1)` — wendet `prox_hlag_vec` unabhängig auf
-  jede Spalte (Quellreihe j) einer `p x k`-Koeffizientenmatrix an. Entspricht
-  `prox2`.
+```R
+# Fix test data (3 standardized variables, n = 100)
+set.seed(123)
+n <- 100
+k <- 3
+p_p2 <- 2
+Y <- scale(matrix(rnorm(n * k), ncol = k))
+colnames(Y) <- c("RegionA", "RegionB", "RegionC")
 
-Fusions-Proximaloperator für die Kettenfusion benachbarter Lags (Group-Fused-Lasso entlang der Lag-Achse). Gelöst via ADMM, da wir eine Kettenstruktur im Gegensatz zur genesteten HLag-Struktur haben.
-- `build_diff_operator(p)` — baut eine `(p-1) x p`-Matrix `D`, sodass
-  `D %*% Phi_i` für jedes Lag-Paar `(l, l+1)` den Unterschied
-  `Phi_i^(l+1) - Phi_i^(l)` liefert.
-- `prox_fusion_row(V, lambda2, weights, D, ...)` — löst den Proximaloperator  
-  der Kettenfusionsstrafe über ein internes ADMM-Verfahren.
+# Helper function to compute absolute differences between Lag 1 and Lag 2
+calc_lag_diffs <- function(Phi_matrix, k) {
+  Lag1 <- Phi_matrix[, 1:k]
+  Lag2 <- Phi_matrix[, (k + 1):(2 * k)]
+  abs(Lag2 - Lag1)
+}
 
-Statt eines festen, nur vom Lag-Abstand abhängigen Gewichts wird zuerst eine
-schnelle Ridge-Vorabschätzung berechnet, aus deren Lag-zu-Lag-Differenzen
-ein individuelles Gewicht je Zielgleichung und Lag-Paar abgeleitet wird.
+# Step 1: Weak Lambda (lambda = 0.05)
+message("\n=== PART 1 (p = 2) - STEP 1: Weak Lambda (lambda = 0.05) ===")
+fit1_p2 <- sparseVAR(Y = Y, p = p_p2, VARpen = "LagFused", selection = "none", VARlseq = 0.05)
+diffs1_p2 <- calc_lag_diffs(fit1_p2$Phi[,,1], k)
 
-- `ridge_prelim_row(Zfull, y_i, p, k, ridge_lambda)` — reine
-  Ridge-Regression (kein HLag, keine Fusion), nur zur Berechnung der
-  adaptiven Gewichte verwendet
-- `adaptive_fusion_weights(Phi_prelim, alpha_decay, weight_eps)` —
-  berechnet für jedes Lag-Paar `(l, l+1)` ein Gewicht
-  `w_l = exp(-alpha) / (||Phi_prelim^(l) - Phi_prelim^(l+1)||_2 + eps)`:
-  kleiner Unterschied in der Vorabschätzung → größeres Gewicht → stärkerer
-  Zwang zur Fusion.
+cat("Absolute differences |Phi_ij^(2) - Phi_ij^(1)|:\n")
+print(round(diffs1_p2, 5))
 
-Verbindung von HLAG und Fusion da die Summe beider Strafterme keinen gemeinsamen
-geschlossenen Proximaloperator besitzt, jede der beiden Strafen einzeln
-aber effizient lösbar ist.
+# Step 2: Medium Lambda (lambda = 0.5) & Comparison with Step 1
+message("\n=== PART 1 (p = 2) - STEP 2: Medium Lambda (lambda = 0.5) ===")
+fit2_p2 <- sparseVAR(Y = Y, p = p_p2, VARpen = "LagFused", selection = "none", VARlseq = 0.5)
+diffs2_p2 <- calc_lag_diffs(fit2_p2$Phi[,,1], k)
 
-- `prox_combined_row(V, lambda1, lambda2, weights, D, ...)` — berechnet den
-  Proximaloperator von `lambda1 * HLag + lambda2 * Fusion` über Dykstras
-  Algorithmus (alternierende Projektionen mit Korrekturtermen). Dies ist im
-  Vergleich zu bigtimes Original die einzige Stelle, an der sich der
-  Algorithmus tatsächlich unterscheidet: In bigtimes `FistaElem` wird an
-  dieser Stelle nur `prox2` (entspricht `prox_hlag_row`) aufgerufen.
+cat("Absolute differences |Phi_ij^(2) - Phi_ij^(1)|:\n")
+print(round(diffs2_p2, 5))
 
-
-bigtimes `FistaElem`/`HVARElemAlgcpp`: Datenaufbau, Schrittweite,
-beschleunigter Gradientenabstieg, Zeilen-Entkopplung über Gleichungen. Neu
-ist ausschließlich die Gewichts-Weiche (fest vs. adaptiv) und der Aufruf
-von `prox_combined_row()` statt eines reinen `prox_hlag_row()`-Aufrufs im
-Prox-Schritt.
-
-- `fit_hlag_fusion_var(Y, p, lambda1, lambda2, alpha_decay, adaptive, ...)` —
-  zeilenweise beschleunigte proximale Gradientenmethode (FISTA). Gibt ein
-  Array der Dimension `p x k x k` zurück (`Phi[lag, Quellreihe j,
-  Zielgleichung i]`); das Attribut `weights_used` enthält die tatsächlich
-  verwendeten Gewichte je Lag-Paar und Zielgleichung.
-
-
-
-
-## Referenzen
-
-- Nicholson, W. B., Wilms, I., Bien, J., & Matteson, D. S. (2020).
-  High-dimensional forecasting via interpretable vector autoregression.
-  *Journal of Machine Learning Research*, 21(166), 1-52.
-- Jenatton, R., Mairal, J., Obozinski, G., & Bach, F. (2011).
-  Proximal methods for hierarchical sparse coding.
-  *Journal of Machine Learning Research*, 12, 2297-2334.
-- Bleakley, K., & Vert, J. P. (2011). The group fused lasso for multiple
-  change-point detection. *arXiv:1106.4199*.
+# Verification check
+is_smaller_or_equal_p2 <- all(diffs2_p2 <= diffs1_p2 + 1e-8)
+if (is_smaller_or_equal_p2) {
+  message("SUCCESS (p=2): All lag differences decreased or stayed equal compared to Step 1!")
+} else {
+  warning("CHECK FAILED (p=2): Some lag differences unexpectedly increased.")
+}
+```
