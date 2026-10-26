@@ -166,16 +166,14 @@ sparseVAR <- function(Y, p=NULL, VARpen="HLag", VARlseq=NULL, VARgran=NULL,
     if(is.null(VARlseq)){
       jj <- .lfunction3(p, k)
 
-      ### ORIGINAL START
-      # if(VARpen=="HLag"){
-      #   VARlseq <- .LambdaGridE(VARgran1, VARgran2, jj, fullY, fullZ, "HVARELEM", p, k,
-      #                           MN=F, alpha=1/(k+1), C=rep(1,p))
-      # }
-      ### ORIGINAL END
-      
-      ### IMB START
-      if(VARpen %in% c("HLag", "LagFused")){
+      if(VARpen=="HLag"){
         VARlseq <- .LambdaGridE(VARgran1, VARgran2, jj, fullY, fullZ, "HVARELEM", p, k,
+                                MN=F, alpha=1/(k+1), C=rep(1,p))
+      }
+
+      ### IMB START
+      if(VARpen == "LagFused"){
+        VARlseq <- .LambdaGridE(VARgran1, VARgran2, jj, fullY, fullZ, "LagFused", p, k,
                                 MN=F, alpha=1/(k+1), C=rep(1,p))
       }
       ### IMB END
@@ -284,16 +282,14 @@ HVAR_cv<-function(Y, p, h=1, lambdaPhiseq=NULL, gran1 = 10^2, gran2=10, T1.cutof
   if(is.null(lambdaPhiseq)){
     jj <- .lfunction3(p, k)
 
-    ### ORIGINAL START
-    # if(type=="HLag"){
-    #   lambdaPhiseq <- .LambdaGridE(gran1, gran2, jj, fullY, fullZ,"HVARELEM", p, k,
-    #                                    MN=F, alpha=1/(k+1), C=rep(1,p))
-    # }
-    ### ORIGINAL END
-    
-    ### IMB START 
-    if(type %in% c("HLag", "LagFused")){
+    if(type=="HLag"){
       lambdaPhiseq <- .LambdaGridE(gran1, gran2, jj, fullY, fullZ,"HVARELEM", p, k,
+                                       MN=F, alpha=1/(k+1), C=rep(1,p))
+    }
+
+    ### IMB START 
+    if(type == "LagFused"){
+      lambdaPhiseq <- .LambdaGridE(gran1, gran2, jj, fullY, fullZ, "LagFused", p, k,
                                    MN=F, alpha=1/(k+1), C=rep(1,p))
     }
     ### IMB END

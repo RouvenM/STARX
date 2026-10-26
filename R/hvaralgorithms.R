@@ -39,16 +39,50 @@
   return(kk)
 }
 
+### ORIGINAL START
+# .LambdaGridE <- function (gran1, gran2, jj = jj, Y, Z, group, p, k, MN, alpha, C)
+# {
+# 
+# 
+#   if (group == "Basic"|group=="Tapered") {
+#     gamstart <- max(t(Y) %*% t(Z))
+#   }
+# 
+# 
+#   if (group == "HVARC"|group=="HVAROO"|group=="HVARELEM"|group=="HVARELEMSQRTLAS"|group=="HVARELEMnucl") {
+#     gmax <- c()
+#     for (i in 1:k) {
+#       gmax[i]  <- norm2(Z %*% Y[, i])
+#     }
+#     gamstart <- max(gmax)
+#   }
+# 
+#   if(group=="Tapered"){
+#     beta <- array(0,dim=c(k,k*p+1,10))
+#   }else{
+#     beta <- array(0,dim=c(k,k*p+1,1))
+#   }
+# 
+#   if (group == "HVARELEM" | group =="Basic"){
+#     estim <- ifelse(group == "Basic", 1, 2)
+#     gamstart <- LGSearch_cpp(gamstart, Y, Z, beta, estim, k, p)
+#   }
+#   else{
+#     gamstart <- LGSearch(gamstart,Y,Z,beta,group,k,p,jj,MN,alpha,C)
+#   }
+# 
+#   gamm <- exp(seq(from = log(gamstart), to = log(gamstart/gran1), length = gran2))
+#   return(gamm)
+# }
+### ORIGINAL END
 
+### IMB START
 .LambdaGridE <- function (gran1, gran2, jj = jj, Y, Z, group, p, k, MN, alpha, C)
 {
-
-
   if (group == "Basic"|group=="Tapered") {
     gamstart <- max(t(Y) %*% t(Z))
   }
-
-
+  
   if (group == "HVARC"|group=="HVAROO"|group=="HVARELEM"|group=="HVARELEMSQRTLAS"|group=="HVARELEMnucl") {
     gmax <- c()
     for (i in 1:k) {
@@ -56,24 +90,59 @@
     }
     gamstart <- max(gmax)
   }
-
+  
+  if (group == "LagFused") {
+    N <- nrow(Y)
+    
+    # Calculate pooled regressors across lags
+    Z_pooled <- matrix(0, nrow = k, ncol = N)
+    for (l in 1:p) {
+      Z_pooled <- Z_pooled + Z[((l - 1) * k + 1):(l * k), , drop = FALSE]
+    }
+    
+    # Compute fused OLS estimates
+    Phi_bar <- t(solve(Z_pooled %*% t(Z_pooled), Z_pooled %*% Y))
+    
+    # Obtain residuals from fused model
+    Res <- Y - t(Z_pooled) %*% t(Phi_bar)
+    
+    # Find maximum gradient difference between adjacent lags
+    max_grad_diff <- 0
+    for (l in 2:p) {
+      Z_l   <- Z[((l - 1) * k + 1):(l * k), , drop = FALSE]
+      Z_l1  <- Z[((l - 2) * k + 1):((l - 1) * k), , drop = FALSE]
+      
+      Grad_l  <- Z_l %*% Res
+      Grad_l1 <- Z_l1 %*% Res
+      
+      diff_val <- max(abs(Grad_l - Grad_l1))
+      if (diff_val > max_grad_diff) {
+        max_grad_diff <- diff_val
+      }
+    }
+    
+    # Set maximum lambda based on gradient difference
+    gamstart <- max_grad_diff
+  }
+  
   if(group=="Tapered"){
     beta <- array(0,dim=c(k,k*p+1,10))
   }else{
     beta <- array(0,dim=c(k,k*p+1,1))
   }
-
+  
   if (group == "HVARELEM" | group =="Basic"){
     estim <- ifelse(group == "Basic", 1, 2)
     gamstart <- LGSearch_cpp(gamstart, Y, Z, beta, estim, k, p)
   }
-  else{
+  else if (group != "LagFused"){
     gamstart <- LGSearch(gamstart,Y,Z,beta,group,k,p,jj,MN,alpha,C)
   }
-
+  
   gamm <- exp(seq(from = log(gamstart), to = log(gamstart/gran1), length = gran2))
   return(gamm)
 }
+### IMB END
 
 
 LGSearch<- function(gstart, Y, Z, BOLD, group, k, p, gs, MN, alpha, C)

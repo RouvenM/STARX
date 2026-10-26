@@ -73,6 +73,8 @@ as.data.frame(Y_raw) %>%
 fit_bike <- sparseVAR(Y = scale(Y_raw), VARpen = "LagFused", selection = "cv")
 
 plot_cv(fit_bike)
+
+fit_bike$Phihat
 plot_coefficient_path(fit_bike)
 plot_row_frobenius_path(fit_bike)
 plot_frobenius_path(fit_bike)
