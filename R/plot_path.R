@@ -96,11 +96,14 @@ plot_frobenius_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lambda =
     ) +
     ggplot2::theme_minimal()
   
+  # Optimal lambda (rot, gestrichelt, dicker)
   if (!is.null(opt_val)) {
-    p_obj <- p_obj + ggplot2::geom_vline(xintercept = opt_val, linetype = "dashed", color = "red", alpha = 0.7)
+    p_obj <- p_obj + ggplot2::geom_vline(xintercept = opt_val, linetype = "dashed", color = "black", linewidth = 1.1)
   }
+  
+  # 1-SE optimal lambda (blau, gepunktet, dicker)
   if (!is.null(se_opt_val)) {
-    p_obj <- p_obj + ggplot2::geom_vline(xintercept = se_opt_val, linetype = "dotted", color = "blue", alpha = 0.7)
+    p_obj <- p_obj + ggplot2::geom_vline(xintercept = se_opt_val, linetype = "dotted", color = "black", linewidth = 1.1)
   }
   
   return(p_obj)
@@ -211,11 +214,14 @@ plot_row_frobenius_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lamb
     ) +
     ggplot2::theme_minimal()
   
+  # Optimal lambda (schwarz, gestrichelt, dicker)
   if (!is.null(opt_val)) {
-    p_obj <- p_obj + ggplot2::geom_vline(xintercept = opt_val, linetype = "dashed", color = "red", alpha = 0.7)
+    p_obj <- p_obj + ggplot2::geom_vline(xintercept = opt_val, linetype = "dashed", color = "black", linewidth = 1.1)
   }
+  
+  # 1-SE optimal lambda (schwarz, gepunktet, dicker)
   if (!is.null(se_opt_val)) {
-    p_obj <- p_obj + ggplot2::geom_vline(xintercept = se_opt_val, linetype = "dotted", color = "blue", alpha = 0.7)
+    p_obj <- p_obj + ggplot2::geom_vline(xintercept = se_opt_val, linetype = "dotted", color = "black", linewidth = 1.1)
   }
   
   return(p_obj)
@@ -332,11 +338,14 @@ plot_coefficient_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lambda
     ) +
     ggplot2::theme_minimal()
   
+  # Optimal lambda (schwarz, gestrichelt, dicker)
   if (!is.null(opt_val)) {
-    p_obj <- p_obj + ggplot2::geom_vline(xintercept = opt_val, linetype = "dashed", color = "red", alpha = 0.7)
+    p_obj <- p_obj + ggplot2::geom_vline(xintercept = opt_val, linetype = "dashed", color = "black", linewidth = 1.1)
   }
+  
+  # 1-SE optimal lambda (schwarz, gepunktet, dicker)
   if (!is.null(se_opt_val)) {
-    p_obj <- p_obj + ggplot2::geom_vline(xintercept = se_opt_val, linetype = "dotted", color = "blue", alpha = 0.7)
+    p_obj <- p_obj + ggplot2::geom_vline(xintercept = se_opt_val, linetype = "dotted", color = "black", linewidth = 1.1)
   }
   
   return(p_obj)

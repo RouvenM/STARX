@@ -62,3 +62,89 @@ image_cv <- function(fit, xlab = "lambda_B", ylab = "lambda_Phi") {
         col = heat.colors(40, rev = TRUE))
   points(fit$lambdaB_SEopt, fit$lambdaPhi_SEopt, pch = 19)
 }
+
+### IMB START
+#' Plot Cross-Validation Error Curve via ggplot2
+#'
+#' Plots the cross-validation error (MSFE) across the lambda grid with error bars (standard error)
+#' in light grey tones, with high-contrast vertical lines for optimal and 1-SE optimal lambdas.
+#'
+#' @param fit A fitted object returned by \code{\link{sparseVAR}} (or \code{cv.sparseVAR}) 
+#'   with class \code{"bigtime.VAR"}.
+#' @param log_lambda Logical; if \code{TRUE}, the x-axis displays \eqn{\log(\lambda)}. Defaults to \code{TRUE}.
+#' @param ... Additional arguments (currently unused).
+#'
+#' @return A \code{\link[ggplot2]{ggplot}} object showing the CV error curve.
+#' @export
+#'
+#' @importFrom ggplot2 ggplot aes geom_line geom_pointrange geom_vline labs theme_minimal
+plot_cv_gg2 <- function(fit, log_lambda = TRUE, ...) {
+  
+  # 1. Input checks
+  if (!inherits(fit, "bigtime.VAR")) {
+    stop("Currently only objects of class 'bigtime.VAR' are supported by plot_cv_gg2.")
+  }
+  
+  if (is.null(fit$selection) || fit$selection != "cv") {
+    stop("No cross-validation was used in model estimation. Set selection = 'cv' in sparseVAR.")
+  }
+  
+  lambda_grid <- fit$lambdas
+  if (is.null(lambda_grid)) {
+    stop("No lambda grid found in the provided fit object.")
+  }
+  
+  # 2. Compute mean CV error (MSFE) and Standard Error
+  m <- fit$MSFEcv
+  se <- apply(fit$MSFE_all, 2, stats::sd) / sqrt(nrow(fit$MSFE_all))
+  
+  plot_data <- data.frame(
+    lambda = lambda_grid,
+    msfe = m,
+    lower = m - se,
+    upper = m + se
+  )
+  
+  # 3. Handle x-axis scaling
+  if (log_lambda) {
+    plot_data$x_val <- log(plot_data$lambda)
+    x_label <- expression(log(lambda))
+    opt_val <- if (!is.null(fit$lambda_opt)) log(fit$lambda_opt) else NULL
+    se_opt_val <- if (!is.null(fit$lambda_SEopt) && !is.na(fit$lambda_SEopt)) log(fit$lambda_SEopt) else NULL
+  } else {
+    plot_data$x_val <- plot_data$lambda
+    x_label <- expression(lambda)
+    opt_val <- fit$lambda_opt
+    se_opt_val <- fit$lambda_SEopt
+  }
+  
+  # 4. Construct plot (Light grey curve with dark red/navy lambda lines)
+  p_obj <- ggplot2::ggplot(plot_data, ggplot2::aes(x = x_val, y = msfe)) +
+    ggplot2::geom_line(color = "grey65", linewidth = 0.7) +
+    ggplot2::geom_pointrange(
+      ggplot2::aes(ymin = lower, ymax = upper),
+      color = "grey55",
+      fill = "grey55",
+      size = 0.45,
+      shape = 21
+    ) +
+    ggplot2::labs(
+      x = x_label,
+      y = "Cross-Validation Error (MSFE)",
+      title = "Cross-Validation Error across Penalty Grid"
+    ) +
+    ggplot2::theme_minimal()
+  
+  # Optimal lambda (dunkelrot, gestrichelt)
+  if (!is.null(opt_val)) {
+    p_obj <- p_obj + ggplot2::geom_vline(xintercept = opt_val, linetype = "dashed", color = "black", linewidth = 1.1)
+  }
+  
+  # 1-SE optimal lambda (marineblau, gepunktet)
+  if (!is.null(se_opt_val)) {
+    p_obj <- p_obj + ggplot2::geom_vline(xintercept = se_opt_val, linetype = "dotted", color = "black", linewidth = 1.1)
+  }
+  
+  return(p_obj)
+}
+### IMB END
