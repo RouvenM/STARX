@@ -90,7 +90,9 @@ simVAR <- function(periods, k, p, coef_mat = NULL, const = rep(0, k), e_dist = r
   if (max_abs_eigval < 0 | max_abs_eigval >=1) stop("Maximum eigenvalue must be strictly between zero and one, not ", max_abs_eigval)
   if (burnin < 0) stop("burnin must be non-negative: burnin >= 0")
   if (burnin == 0) warning("Not burning in the series is not recommended")
-  if (!is.null(coef_mat)) warning("Will not use provided sparsity_pattern since coef_mat was given")
+  if (!is.null(coef_mat) && !missing(sparsity_pattern)) {
+    warning("Will not use provided sparsity_pattern since coef_mat was given")
+  }
   if (decay > 1 | decay <=0) stop("Decay parameter must be between 0 and 1 (including)")
 
   # Which sparsity pattern was chosen?
