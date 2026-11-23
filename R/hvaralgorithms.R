@@ -76,7 +76,6 @@
 # }
 ### ORIGINAL END
 
-### IMB START
 .LambdaGridE <- function (gran1, gran2, jj = jj, Y, Z, group, p, k, MN, alpha, C)
 {
   if (group == "Basic"|group=="Tapered") {
@@ -92,57 +91,53 @@
   }
   
   if (group == "LagFused") {
-    N <- nrow(Y)
+    # Ensure Y is a matrix (handles k = 1) and center Y and Z as in VARLagFusedcpp
+    Y_mat <- if (is.matrix(Y)) Y else matrix(Y, ncol = k)
+    Y_c <- scale(Y_mat, center = TRUE, scale = FALSE)
+    Z_c <- Z - rowMeans(Z)
     
-    # Calculate pooled regressors across lags
-    Z_pooled <- matrix(0, nrow = k, ncol = N)
-    for (l in 1:p) {
-      Z_pooled <- Z_pooled + Z[((l - 1) * k + 1):(l * k), , drop = FALSE]
+    # Build backward-cumulative lag blocks Z_tilde[[m]] = sum_{l=m}^p Z_c^(l)
+    Z_tilde <- vector("list", p)
+    Z_tilde[[p]] <- Z_c[((p - 1) * k + 1):(p * k), , drop = FALSE]
+    for (m in (p - 1):1) {
+      Z_m <- Z_c[((m - 1) * k + 1):(m * k), , drop = FALSE]
+      Z_tilde[[m]] <- Z_tilde[[m + 1]] + Z_m
     }
     
-    # Compute fused OLS estimates
-    Phi_bar <- t(solve(Z_pooled %*% t(Z_pooled), Z_pooled %*% Y))
+    # Compute pooled OLS estimates (corresponds to fully fused model where delta^(2..p) = 0)
+    Z_pooled <- Z_tilde[[1]]
+    Phi_bar_t <- solve(Z_pooled %*% t(Z_pooled), Z_pooled %*% Y_c)
+    Res <- Y_c - t(Z_pooled) %*% Phi_bar_t
     
-    # Obtain residuals from fused model
-    Res <- Y - t(Z_pooled) %*% t(Phi_bar)
-    
-    # Find maximum gradient difference between adjacent lags
-    max_grad_diff <- 0
-    for (l in 2:p) {
-      Z_l   <- Z[((l - 1) * k + 1):(l * k), , drop = FALSE]
-      Z_l1  <- Z[((l - 2) * k + 1):((l - 1) * k), , drop = FALSE]
-      
-      Grad_l  <- Z_l %*% Res
-      Grad_l1 <- Z_l1 %*% Res
-      
-      diff_val <- max(abs(Grad_l - Grad_l1))
-      if (diff_val > max_grad_diff) {
-        max_grad_diff <- diff_val
+    # Exact KKT lambda_max: max_{i, m >= 2} || Z_tilde^(m) * r_i ||_2
+    gamstart <- 0
+    for (m in 2:p) {
+      G_m <- Z_tilde[[m]] %*% Res
+      max_norm_m <- max(sqrt(colSums(G_m^2)))
+      if (max_norm_m > gamstart) {
+        gamstart <- max_norm_m
       }
     }
-    
-    # Set maximum lambda based on gradient difference
-    gamstart <- max_grad_diff
   }
-  
+
   if(group=="Tapered"){
     beta <- array(0,dim=c(k,k*p+1,10))
   }else{
     beta <- array(0,dim=c(k,k*p+1,1))
   }
-  
-  if (group == "HVARELEM" | group =="Basic"){
+ 
+  if (group == "HVARELEM" | group == "Basic") {
     estim <- ifelse(group == "Basic", 1, 2)
     gamstart <- LGSearch_cpp(gamstart, Y, Z, beta, estim, k, p)
-  }
-  else if (group != "LagFused"){
-    gamstart <- LGSearch(gamstart,Y,Z,beta,group,k,p,jj,MN,alpha,C)
+  } else if (group != "LagFused") {
+    gamstart <- LGSearch(gamstart, Y, Z, beta, group, k, p, jj, MN, alpha, C)
   }
   
   gamm <- exp(seq(from = log(gamstart), to = log(gamstart/gran1), length = gran2))
   return(gamm)
 }
 ### IMB END
+
 
 
 LGSearch<- function(gstart, Y, Z, BOLD, group, k, p, gs, MN, alpha, C)

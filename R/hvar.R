@@ -341,8 +341,24 @@ HVAR_cv<-function(Y, p, h=1, lambdaPhiseq=NULL, gran1 = 10^2, gran2=10, T1.cutof
   sparsitynew <- apply(sparsitymatrix,2,mean)
   sparsitynew[!MSFE_flagOK] <- NA
 
-  lambda_opt_oneSE <- lambdaPhiseq[which.min(sparsitynew)]
-
+  ### ORIGINAL START
+  # lambda_opt_oneSE <- lambdaPhiseq[which.min(sparsitynew)]
+  ### ORIGINAL END
+  
+  ### IMB START
+  if (type == "LagFused") {
+    # Paper 1-SE rule: select largest lambda within one standard error of minimum MSFE
+    ok_idx <- which(MSFE_flagOK)
+    if (length(ok_idx) > 0) {
+      lambda_opt_oneSE <- max(lambdaPhiseq[ok_idx])
+    } else {
+      lambda_opt_oneSE <- lambda_optinit
+    }
+  } else {
+    lambda_opt_oneSE <- lambdaPhiseq[which.min(sparsitynew)]
+  }
+  ### IMB END
+  
   if(length(lambda_opt_oneSE)==0){
     lambda_opt_oneSE <- lambda_optinit
   }else{

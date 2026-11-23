@@ -158,104 +158,65 @@ arma::rowvec prox2(arma::colvec v,double lambda, int k,int p,uvec res1, arma::co
 }
 
 // IMB START
-arma::rowvec proxLagFused(arma::colvec v, double lambda, int k, int p)
+// Exact proximal operator for row-wise group lag fusion in difference coordinates:
+// Block 0 (lag 1) is unpenalized; blocks 1..(p-1) are lag differences delta^(l) = Phi^(l) - Phi^(l-1)
+arma::rowvec proxLagFused(const arma::colvec& v, const double lambda, const int k, const int p)
 {
-  arma::rowvec v2(v.n_elem);
+  arma::colvec v_out(v.n_elem, arma::fill::zeros);
   
-  for(int i = 0; i < k; ++i)
-  {
-    uvec bb = bbsubs(i, k, p);
-    arma::colvec vFused = v(bb);
+  // Lag 1 block (index 0) is unpenalized
+  v_out.subvec(0, k - 1) = v.subvec(0, k - 1);
+  
+  // Apply group soft-thresholding to each lag difference block l = 1, ..., p - 1
+  for (int l = 1; l < p; ++l) {
+    int start_idx = l * k;
+    int end_idx = (l + 1) * k - 1;
+    arma::colvec block = v.subvec(start_idx, end_idx);
+    double block_norm = arma::norm(block, 2);
     
-    if (p >= 2) {
-      for(int l = 1; l < p; ++l) {
-        double diff = vFused(l) - vFused(l-1);
-        if (std::abs(diff) <= 2.0 * lambda) {
-          double avg = 0.5 * (vFused(l) + vFused(l-1));
-          vFused(l) = avg;
-          vFused(l-1) = avg;
-        } else if (diff > 2.0 * lambda) {
-          vFused(l) -= lambda;
-          vFused(l-1) += lambda;
-        } else {
-          vFused(l) += lambda;
-          vFused(l-1) -= lambda;
-        }
-      }
-      
-      for(int l = p - 2; l >= 0; --l) {
-        double diff = vFused(l+1) - vFused(l);
-        if (std::abs(diff) <= 2.0 * lambda) {
-          double avg = 0.5 * (vFused(l+1) + vFused(l));
-          vFused(l+1) = avg;
-          vFused(l) = avg;
-        }
-      }
-      
-      if (lambda > 100.0) {
-        double total_mean = 0.0;
-        for(int l = 0; l < p; ++l) {
-          total_mean += vFused(l);
-        }
-        total_mean /= p;
-        
-        bool all_close = true;
-        for(int l = 0; l < p; ++l) {
-          if (std::abs(vFused(l) - total_mean) > 1e-4 * lambda) {
-            all_close = false;
-            break;
-          }
-        }
-        if (all_close) {
-          for(int l = 0; l < p; ++l) {
-            vFused(l) = total_mean;
-          }
-        }
-      }
+    if (block_norm > lambda) {
+      v_out.subvec(start_idx, end_idx) = (1.0 - lambda / block_norm) * block;
+    } else {
+      v_out.subvec(start_idx, end_idx).zeros();
     }
-    
-    v2(bb) = trans(vFused);
   }
   
-  return v2;
+  return arma::trans(v_out);
 }
 // IMB END
 
 // IMB START
-// [[Rcpp::export]]
-arma::mat FistaLagFused(const arma::mat& Y, const arma::mat& Z, arma::mat phi, const int p, const int k, double lambda, const double eps, const double tk)
+// Accelerated proximal gradient (FISTA) in reparameterized difference coordinates
+arma::mat FistaLagFused(const arma::mat& Y, const arma::mat& Z_tilde, const arma::mat& delta_init,
+                        const int p, const int k, const double lambda, const double eps, const double tk)
 {
-  double j = 1;
-  arma::mat phiFin = phi;
-  arma::rowvec phiR = phi.row(0);
-  arma::rowvec phiOLD = phiR;
-  arma::rowvec phiOLDOLD = phiOLD;
-  arma::rowvec v = phiR;
+  const int max_iter = 10000;
+  arma::mat deltaFin = delta_init;
   
-  for(int i = 0; i < k; ++i)
-  {
-    j = 1;
-    double thresh = 10 * eps;
-    phiR = phi.row(i);
-    phiOLD = phiR;
-    phiOLDOLD = phiOLD;
-    v = phiR;
+  for (int i = 0; i < k; ++i) {
+    double j = 1.0;
+    double thresh = 10.0 * eps;
+    arma::rowvec deltaR = delta_init.row(i);
+    arma::rowvec deltaOLD = deltaR;
+    arma::rowvec deltaOLDOLD = deltaOLD;
+    arma::rowvec v = deltaR;
     
-    while(thresh > eps)
-    { 
-      v = phiOLD + ((j - 2) / (j + 1)) * (phiOLD - phiOLDOLD);
+    while (thresh > eps && j <= max_iter) {
+      v = deltaOLD + ((j - 2.0) / (j + 1.0)) * (deltaOLD - deltaOLDOLD);
       
-      // Hier rufen wir unsere neue Time-Lag Fused Proximal-Funktion auf!
-      phiR = proxLagFused(vectorise(v) + tk * vectorise((trans(Y.col(i)) - v * Z) * trans(Z)), tk * lambda, k, p);
+      arma::colvec grad_step =
+        arma::vectorise(v) + tk * arma::vectorise((arma::trans(Y.col(i)) - v * Z_tilde) * arma::trans(Z_tilde));
+      deltaR = proxLagFused(grad_step, tk * lambda, k, p);
       
-      thresh = max(abs(phiR - v));
-      phiOLDOLD = phiOLD;
-      phiOLD = phiR;
-      j += 1;
+      thresh = arma::max(arma::abs(deltaR - v));
+      deltaOLDOLD = deltaOLD;
+      deltaOLD = deltaR;
+      j += 1.0;
     }
-    phiFin.row(i) = phiR;
+    deltaFin.row(i) = deltaR;
   }
-  return phiFin;
+  
+  return deltaFin;
 }
 // IMB END
 
@@ -475,26 +436,36 @@ arma::cube gamloopElem2(arma::cube &bcube, const arma::mat& Y,const arma::mat& Z
 }
 
 // IMB START
-// Lambda loop for Time-Lag Fused VAR
-// [[Rcpp::export]]
-arma::cube gamloopLagFused(arma::cube &bcube, const arma::mat& Y, const arma::mat& Z, arma::colvec gammgrid, const double eps,
-                           const arma::colvec YMean2, const arma::colvec ZMean2, arma::mat &B1, const int k, const int p, const double tk,
-                           const int flag_restart_opt = 1){
+// Loop over lambda grid in difference coordinates, then transform back to Phi and compute intercept
+arma::cube gamloopLagFused(arma::cube& delta_cube, const arma::mat& Y, const arma::mat& Z_tilde,
+                           const arma::colvec& gammgrid, const double eps,
+                           const arma::colvec& YMean2, const arma::colvec& ZMean2,
+                           arma::mat& D1, const int k, const int p, const double tk,
+                           const int flag_restart_opt = 1)
+{
+  arma::mat D1F2 = D1;
+  int ngridpts = delta_cube.n_slices;
+  arma::cube bcube2(k, k * p + 1, ngridpts, arma::fill::zeros);
+  arma::colvec nu(k, arma::fill::zeros);
   
-  arma::mat B1F2 = B1;
-  int ngridpts = bcube.n_slices;
-  arma::cube bcube2(k, k*p + 1, ngridpts);
-  bcube2.fill(0);
-  colvec nu = zeros<colvec>(k);
-  
-  int i;
-  B1 = bcube.slice(0);
-  for (i = 0; i < ngridpts; ++i) {
-    B1F2 = (flag_restart_opt == 1) ? B1 : bcube.slice(i);
-    // Aufruf unserer neuen FistaLagFused Funktion:
-    B1 = FistaLagFused(Y, Z, B1F2, p, k, gammgrid[i], eps, tk);
-    nu = YMean2 - B1 * ZMean2;
-    bcube2.slice(i) = mat(join_horiz(nu, B1));
+  D1 = delta_cube.slice(0);
+  for (int i = 0; i < ngridpts; ++i) {
+    D1F2 = (flag_restart_opt == 1) ? D1 : delta_cube.slice(i);
+    
+    // Optimize in difference coordinates (D1 stays in Delta-space for warm starts)
+    D1 = FistaLagFused(Y, Z_tilde, D1F2, p, k, gammgrid[i], eps, tk);
+    
+    // Transform back from difference coordinates Delta to original lag matrices Phi
+    arma::mat Phi_est(k, k * p, arma::fill::zeros);
+    Phi_est.cols(0, k - 1) = D1.cols(0, k - 1);
+    for (int l = 1; l < p; ++l) {
+      Phi_est.cols(l * k, (l + 1) * k - 1) =
+        Phi_est.cols((l - 1) * k, l * k - 1) + D1.cols(l * k, (l + 1) * k - 1);
+    }
+    
+    // Reconstruct unpenalized intercept using original Z means
+    nu = YMean2 - Phi_est * ZMean2;
+    bcube2.slice(i) = arma::join_horiz(nu, Phi_est);
   }
   
   return bcube2;
@@ -605,36 +576,59 @@ arma::cube HVARElemAlgcpp(const arma::cube &beta, const arma::mat& trainY, const
 
 // IMB START
 // [[Rcpp::export]]
-arma::cube VARLagFusedcpp(const arma::cube &beta, const arma::mat& trainY, const arma::mat& trainZ, const arma::colvec& lambda,
-                           const double& tol, const int& p, const int flag_restart_opt = 0){
-  // Preliminaries
+arma::cube VARLagFusedcpp(const arma::cube& beta, const arma::mat& trainY, const arma::mat& trainZ,
+                          const arma::colvec& lambda, const double& tol, const int& p,
+                          const int flag_restart_opt = 0)
+{
   int n = trainY.n_rows;
   int k = trainY.n_cols;
   int g = beta.n_slices;
-  arma::mat YMean = mean(trainY);
-  arma::mat ZMean = mean(trainZ.t());
   
-  arma::mat Y = zeros(n, k);
+  // Center Y and Z to analytically remove the unpenalized intercept
+  arma::mat YMean = arma::mean(trainY);
+  arma::mat ZMean = arma::mean(trainZ.t());
+  arma::mat Y(n, k, arma::fill::zeros);
   arma::mat trainZt = trainZ.t();
-  arma::mat Z = zeros(n, k*p);
-  for (int i = 0; i < n; i++) {
+  arma::mat Z(n, k * p, arma::fill::zeros);
+  for (int i = 0; i < n; ++i) {
     Y.row(i) = trainY.row(i) - YMean;
     Z.row(i) = trainZt.row(i) - ZMean;
   }
   Z = Z.t();
   
-  // Step size
-  vec eigval;
+  // Build backward-cumulative regressor matrix Z_tilde for difference reparameterization:
+  // Z_tilde^(m) = sum_{l=m}^{p} Z^(l)
+  arma::mat Z_tilde(k * p, n, arma::fill::zeros);
+  Z_tilde.rows((p - 1) * k, p * k - 1) = Z.rows((p - 1) * k, p * k - 1);
+  for (int l = p - 2; l >= 0; --l) {
+    Z_tilde.rows(l * k, (l + 1) * k - 1) =
+      Z_tilde.rows((l + 1) * k, (l + 2) * k - 1) + Z.rows(l * k, (l + 1) * k - 1);
+  }
+  
+  // Compute Lipschitz step size from Z_tilde * Z_tilde^T
+  arma::vec eigval;
   arma::mat eigvec;
-  const arma::mat Zt = Z * trans(Z);
-  eig_sym(eigval, eigvec, Zt);
-  double tk = 1 / max(eigval);
+  const arma::mat Zt_tilde = Z_tilde * arma::trans(Z_tilde);
+  arma::eig_sym(eigval, eigvec, Zt_tilde);
+  double tk = 1.0 / arma::max(eigval);
   
-  arma::mat betaini1 = beta.subcube(0, 1, 0, k-1, k*p + 1 - 1, 0);
-  arma::cube betaini = beta.subcube(0, 1, 0, k-1, k*p + 1 - 1, g-1);
+  // Convert initial/warm-start Phi slices into difference coordinates Delta
+  arma::cube betaini = beta.subcube(0, 1, 0, k - 1, k * p, g - 1);
+  arma::cube deltainit(k, k * p, g, arma::fill::zeros);
+  for (int s = 0; s < g; ++s) {
+    arma::mat Phi_s = betaini.slice(s);
+    arma::mat Delta_s(k, k * p, arma::fill::zeros);
+    Delta_s.cols(0, k - 1) = Phi_s.cols(0, k - 1);
+    for (int l = 1; l < p; ++l) {
+      Delta_s.cols(l * k, (l + 1) * k - 1) =
+        Phi_s.cols(l * k, (l + 1) * k - 1) - Phi_s.cols((l - 1) * k, l * k - 1);
+    }
+    deltainit.slice(s) = Delta_s;
+  }
+  arma::mat deltainit1 = deltainit.slice(0);
   
-  // Aufruf unserer neuen gamloopLagFused Funktion:
-  arma::cube betaout = gamloopLagFused(betaini, Y, Z, lambda, tol, YMean.t(), ZMean.t(), betaini1, k, p, tk, flag_restart_opt);
+  arma::cube betaout = gamloopLagFused(deltainit, Y, Z_tilde, lambda, tol,
+                                       YMean.t(), ZMean.t(), deltainit1, k, p, tk, flag_restart_opt);
   
   return betaout;
 }
@@ -642,7 +636,7 @@ arma::cube VARLagFusedcpp(const arma::cube &beta, const arma::mat& trainY, const
 
 cv_aux_out HVAR_cvaux_cpp(const arma::mat & Y, const arma::mat& Z, int t, const arma::colvec& gamm, const double eps, int p, const double estim,
                           arma::cube Phi, const int flag_restart_opt = 0){
-
+  
   int k = Y.n_cols;
   int g = gamm.size();
   arma::mat trainY = Y.submat(0, 0, t-1, k-1);
@@ -654,38 +648,68 @@ cv_aux_out HVAR_cvaux_cpp(const arma::mat & Y, const arma::mat& Z, int t, const 
   arma::mat MSFE = zeros(1, g);
   arma::mat sparsity = zeros(1, g);
   arma::mat pred;
-
+  
   if(estim==1){
     Phi  = lassoVARFistcpp(Phi, trainY, trainZ, gamm, eps, p);
   }
-
+  
   if(estim==2){
     Phi  = HVARElemAlgcpp(Phi, trainY, trainZ, gamm, eps, p, flag_restart_opt);
   }
   
-  // IMB START: LagFused Zweig für Cross-Validation (estim == 3)
+  // IMB START
+  // LagFused branch for cross-validation (estim == 3)
   if(estim==3){
     Phi  = VARLagFusedcpp(Phi, trainY, trainZ, gamm, eps, p, flag_restart_opt);
   }
   // IMB END
-
+  
   // Forecasts
   for (int igran = 0; igran < g; igran++) {
     arma::mat betagran = Phi.subcube(0, 0, igran, k-1,  k*p + 1 - 1, igran);
-    arma::vec nz = nonzeros(betagran);
-    pred = betagran*testZc;
+    
+    // ORIGINAL START
+    // arma::vec nz = nonzeros(betagran);
+    // pred = betagran*testZc;
+    // arma::mat diff = testY.t() - pred;
+    // MSFE.col(igran) = mean(pow(diff, 2));
+    // sparsity(igran) = nz.size() - k;
+    // ORIGINAL END
+    
+    // IMB START
+    pred = betagran * testZc;
     arma::mat diff = testY.t() - pred;
     MSFE.col(igran) = mean(pow(diff, 2));
-    sparsity(igran) = nz.size() - k;
+    
+    if (estim == 3) {
+      // Count active (non-fused) row-wise transitions between adjacent lags
+      arma::mat Phi_gran = betagran.cols(1, k * p);
+      int active_transitions = 0;
+      for (int i = 0; i < k; ++i) {
+        for (int l = 1; l < p; ++l) {
+          arma::rowvec diff_lag =
+            Phi_gran.submat(i, l * k, i, (l + 1) * k - 1) -
+            Phi_gran.submat(i, (l - 1) * k, i, l * k - 1);
+          if (arma::norm(diff_lag, 2) > 1e-8) {
+            active_transitions += 1;
+          }
+        }
+      }
+      sparsity(igran) = active_transitions;
+    } else {
+      arma::vec nz = nonzeros(betagran);
+      sparsity(igran) = nz.size() - k;
+    }
+    // IMB END
   }
-
-
+  
+  
   cv_aux_out my_cv_aux;
   my_cv_aux.MSFEs = MSFE;
   my_cv_aux.sparsity = sparsity;
   my_cv_aux.Phi = Phi;
-
-
+  
+  
   return(my_cv_aux);
 }
 
