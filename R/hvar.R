@@ -253,8 +253,7 @@ HVAR<-function(fullY, fullZ, p, k, lambdaPhi, eps=1e-5, type="HLag"){
       fullY <- matrix(fullY, ncol=1)
     }
     
-    Phi <- HVARLagFusedcpp(array(0, dim=c(k, k*p+1, 1)), fullY, fullZ, lambdaPhi, eps, p)
-    # Name "HVARLagFusedcpp" sinnvoll?
+    Phi <- VARLagFusedcpp(array(0, dim=c(k, k*p+1, 1)), fullY, fullZ, lambdaPhi, eps, p)
   }
   ### IMB END
 

@@ -605,7 +605,7 @@ arma::cube HVARElemAlgcpp(const arma::cube &beta, const arma::mat& trainY, const
 
 // IMB START
 // [[Rcpp::export]]
-arma::cube HVARLagFusedcpp(const arma::cube &beta, const arma::mat& trainY, const arma::mat& trainZ, const arma::colvec& lambda,
+arma::cube VARLagFusedcpp(const arma::cube &beta, const arma::mat& trainY, const arma::mat& trainZ, const arma::colvec& lambda,
                            const double& tol, const int& p, const int flag_restart_opt = 0){
   // Preliminaries
   int n = trainY.n_rows;
@@ -665,7 +665,7 @@ cv_aux_out HVAR_cvaux_cpp(const arma::mat & Y, const arma::mat& Z, int t, const 
   
   // IMB START: LagFused Zweig für Cross-Validation (estim == 3)
   if(estim==3){
-    Phi  = HVARLagFusedcpp(Phi, trainY, trainZ, gamm, eps, p, flag_restart_opt);
+    Phi  = VARLagFusedcpp(Phi, trainY, trainZ, gamm, eps, p, flag_restart_opt);
   }
   // IMB END
 
