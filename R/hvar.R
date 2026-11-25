@@ -7,7 +7,13 @@
 #' @param VARgran User-specified vector of granularity specifications for the penalty parameter grid:  First element specifies
 #' how deep the grid should be constructed. Second element specifies how many values the grid should contain.
 #' @param cvcut Proportion of observations used for model estimation in the time series cross-validation procedure. The remainder is used for forecast evaluation. Redundant if selection is not "cv".
+### ORIGINAL START
 #' @param eps a small positive numeric value giving the tolerance for convergence in the proximal gradient algorithm.
+### ORIGINAL END
+### IMB START
+#' @param eps a small positive numeric value giving the tolerance for convergence in the proximal gradient algorithm.
+#' If NULL (default), uses 1e-3 for "HLag" and "L1" (bigtime default) and 1e-6 for "LagFused".
+### IMB END
 #' @param VARpen "HLag" (hierarchical sparse penalty) or "L1" (standard lasso penalty) penalization.
 #' @param selection One of "none" (default), "cv" (Time Series Cross-Validation), "bic", "aic", "hq". Used to select the optimal penalization.
 #' @param check_std Check whether data is standardised. Default is TRUE and is not recommended to be changed
@@ -33,10 +39,17 @@
 #' data(var.example)
 #' VARfit <- sparseVAR(Y = scale(Y.var)) # sparse VAR
 #' ARfit <- sparseVAR(Y=scale(Y.var[,2])) # sparse AR
+### ORIGINAL START
+# sparseVAR <- function(Y, p=NULL, VARpen="HLag", VARlseq=NULL, VARgran=NULL,
+#                       selection = c("none", "cv", "bic", "aic", "hq"),
+#                       cvcut=0.9, h=1,  eps=1e-3, check_std = TRUE, verbose = FALSE){
+### ORIGINAL END
+
+### IMB START
 sparseVAR <- function(Y, p=NULL, VARpen="HLag", VARlseq=NULL, VARgran=NULL,
                       selection = c("none", "cv", "bic", "aic", "hq"),
-                      cvcut=0.9, h=1,  eps=1e-3, check_std = TRUE, verbose = FALSE){
-
+                      cvcut=0.9, h=1,  eps=NULL, check_std = TRUE, verbose = FALSE){
+### IMB END
   # Check Inputs
   if(!is.matrix(Y)){
 
@@ -111,9 +124,22 @@ sparseVAR <- function(Y, p=NULL, VARpen="HLag", VARlseq=NULL, VARgran=NULL,
   }
   ### IMB END
 
+  ### IMB START
+  # Set penalty-dependent default convergence tolerance
+  if(is.null(eps)){
+    eps <- if(VARpen == "LagFused") 1e-6 else 1e-3
+  }
+  ### IMB END
+  
   if(eps<=0){
     stop("The convergence tolerance parameter eps needs to be a small positive number")
   }
+  
+  ### IMB START
+  if(VARpen == "LagFused" & eps > 1e-4){
+    warning("For LagFused penalization, a stricter tolerance (eps <= 1e-5) is recommended to ensure accurate convergence.")
+  }
+  ### IMB END
 
 
   if(is.null(p)){
@@ -230,7 +256,19 @@ HVARmodel<-function(Y, p, h=1){
   out<-list("fullY"=fullY, "fullZ"=fullZ, "k"=k, "p"=p)
 }
 
-HVAR<-function(fullY, fullZ, p, k, lambdaPhi, eps=1e-5, type="HLag"){
+### ORIGINAL START
+# HVAR<-function(fullY, fullZ, p, k, lambdaPhi, eps=1e-5, type="HLag"){
+### ORIGINAL END
+
+### IMB START
+HVAR<-function(fullY, fullZ, p, k, lambdaPhi, eps=NULL, type="HLag"){
+### IMB END
+  
+  ### IMB START
+  if(is.null(eps)){
+    eps <- if(type == "LagFused") 1e-6 else 1e-5
+  }
+  ### IMB END
 
   # HVAR estimates
   if(type=="HLag"){
@@ -265,7 +303,19 @@ HVAR<-function(fullY, fullZ, p, k, lambdaPhi, eps=1e-5, type="HLag"){
 
 }
 
-HVAR_cv<-function(Y, p, h=1, lambdaPhiseq=NULL, gran1 = 10^2, gran2=10, T1.cutoff=0.9, eps=1e-5, type="HLag"){
+### ORIGINAL START
+# HVAR_cv<-function(Y, p, h=1, lambdaPhiseq=NULL, gran1 = 10^2, gran2=10, T1.cutoff=0.9, eps=1e-5, type="HLag"){
+### ORIGINAL END
+
+### IMB START
+HVAR_cv<-function(Y, p, h=1, lambdaPhiseq=NULL, gran1 = 10^2, gran2=10, T1.cutoff=0.9, eps=NULL, type="HLag"){
+### IMB END
+  
+  ### IMB START
+  if(is.null(eps)){
+    eps <- if(type == "LagFused") 1e-6 else 1e-5
+  }
+  ### IMB END
 
   # Get response and predictor matrix
   HVARmodelFIT <- HVARmodel(Y=Y, p=p, h=h)
