@@ -12,9 +12,14 @@
 ### ORIGINAL END
 ### IMB START
 #' @param eps a small positive numeric value giving the tolerance for convergence in the proximal gradient algorithm.
-#' If NULL (default), uses 1e-3 for "HLag" and "L1" (bigtime default) and 1e-6 for "LagFused".
+#' If NULL (default), uses 1e-3 for "HLag" and "L1" (bigtime default) and 1e-6 for "LagFused" and "LagFusedZero".
 ### IMB END
+### ORIGINAL START
 #' @param VARpen "HLag" (hierarchical sparse penalty) or "L1" (standard lasso penalty) penalization.
+### ORIGINAL END
+### IMB START
+#' @param VARpen "HLag" (hierarchical sparse penalty), "L1" (standard lasso penalty), "LagFused" (row-wise lag fusion penalty across consecutive lag matrices), or "LagFusedZero" (row-wise lag fusion penalty with an implicit zero matrix at lag \eqn{p+1} to induce shrinkage toward zero).
+### IMB END
 #' @param selection One of "none" (default), "cv" (Time Series Cross-Validation), "bic", "aic", "hq". Used to select the optimal penalization.
 #' @param check_std Check whether data is standardised. Default is TRUE and is not recommended to be changed
 #' @param verbose Logical to print value of information criteria for each lambda together with selection. Default is FALSE
@@ -103,8 +108,8 @@ sparseVAR <- function(Y, p=NULL, VARpen="HLag", VARlseq=NULL, VARgran=NULL,
   ### ORIGINAL END
   
   ### IMB START
-  if(!is.element(VARpen, c("HLag", "L1", "LagFused"))){
-    stop("The type of penalization VARpen needs to be either HLag (hierarchical sparse penalization), L1 (standard lasso penalization), or LagFused (time-lag fused penalization)")
+  if(!is.element(VARpen, c("HLag", "L1", "LagFused", "LagFusedZero"))){
+    stop("The type of penalization VARpen needs to be either HLag (hierarchical sparse penalization), L1 (standard lasso penalization), LagFused (time-lag fused penalization), or LagFusedZero (time-lag fused penalization with zero anchor)")
   }
   ### IMB END
 
@@ -118,8 +123,8 @@ sparseVAR <- function(Y, p=NULL, VARpen="HLag", VARlseq=NULL, VARgran=NULL,
   
   ### IMB START
   if(!is.null(p)){
-    if((VARpen=="HLag" | VARpen=="LagFused") & p<=1){
-      stop("HLag and LagFused penalization are only supported for p>1. Use L1 as VARpen instead")
+    if((VARpen %in% c("HLag", "LagFused", "LagFusedZero")) & p<=1){
+      stop("HLag, LagFused, and LagFusedZero penalization are only supported for p>1. Use L1 as VARpen instead")
     }
   }
   ### IMB END
@@ -127,7 +132,7 @@ sparseVAR <- function(Y, p=NULL, VARpen="HLag", VARlseq=NULL, VARgran=NULL,
   ### IMB START
   # Set penalty-dependent default convergence tolerance
   if(is.null(eps)){
-    eps <- if(VARpen == "LagFused") 1e-6 else 1e-3
+    eps <- if(VARpen %in% c("LagFused", "LagFusedZero")) 1e-6 else 1e-3
   }
   ### IMB END
   
@@ -136,8 +141,8 @@ sparseVAR <- function(Y, p=NULL, VARpen="HLag", VARlseq=NULL, VARgran=NULL,
   }
   
   ### IMB START
-  if(VARpen == "LagFused" & eps > 1e-4){
-    warning("For LagFused penalization, a stricter tolerance (eps <= 1e-5) is recommended to ensure accurate convergence.")
+  if((VARpen %in% c("LagFused", "LagFusedZero")) & eps > 1e-4){
+    warning("For LagFused and LagFusedZero penalization, a stricter tolerance (eps <= 1e-5) is recommended to ensure accurate convergence.")
   }
   ### IMB END
 
@@ -198,8 +203,8 @@ sparseVAR <- function(Y, p=NULL, VARpen="HLag", VARlseq=NULL, VARgran=NULL,
       }
 
       ### IMB START
-      if(VARpen == "LagFused"){
-        VARlseq <- .LambdaGridE(VARgran1, VARgran2, jj, fullY, fullZ, "LagFused", p, k,
+      if(VARpen %in% c("LagFused", "LagFusedZero")){
+        VARlseq <- .LambdaGridE(VARgran1, VARgran2, jj, fullY, fullZ, VARpen, p, k,
                                 MN=F, alpha=1/(k+1), C=rep(1,p))
       }
       ### IMB END
@@ -266,7 +271,7 @@ HVAR<-function(fullY, fullZ, p, k, lambdaPhi, eps=NULL, type="HLag"){
   
   ### IMB START
   if(is.null(eps)){
-    eps <- if(type == "LagFused") 1e-6 else 1e-5
+    eps <- if(type %in% c("LagFused", "LagFusedZero")) 1e-6 else 1e-5
   }
   ### IMB END
 
@@ -285,13 +290,14 @@ HVAR<-function(fullY, fullZ, p, k, lambdaPhi, eps=NULL, type="HLag"){
   }
   
   ### IMB START
-  # Time-Lag Fused estimates
-  if(type=="LagFused"){
+  # Time-Lag Fused estimates (with optional zero anchor at lag p+1)
+  if(type %in% c("LagFused", "LagFusedZero")){
     if(k==1){
       fullY <- matrix(fullY, ncol=1)
     }
     
-    Phi <- VARLagFusedcpp(array(0, dim=c(k, k*p+1, 1)), fullY, fullZ, lambdaPhi, eps, p)
+    zero_anchor <- (type == "LagFusedZero")
+    Phi <- VARLagFusedcpp(array(0, dim=c(k, k*p+1, 1)), fullY, fullZ, lambdaPhi, eps, p, zero_anchor = zero_anchor)
   }
   ### IMB END
 
@@ -313,7 +319,7 @@ HVAR_cv<-function(Y, p, h=1, lambdaPhiseq=NULL, gran1 = 10^2, gran2=10, T1.cutof
   
   ### IMB START
   if(is.null(eps)){
-    eps <- if(type == "LagFused") 1e-6 else 1e-5
+    eps <- if(type %in% c("LagFused", "LagFusedZero")) 1e-6 else 1e-5
   }
   ### IMB END
 
@@ -336,9 +342,9 @@ HVAR_cv<-function(Y, p, h=1, lambdaPhiseq=NULL, gran1 = 10^2, gran2=10, T1.cutof
                                        MN=F, alpha=1/(k+1), C=rep(1,p))
     }
 
-    ### IMB START 
-    if(type == "LagFused"){
-      lambdaPhiseq <- .LambdaGridE(gran1, gran2, jj, fullY, fullZ, "LagFused", p, k,
+    ### IMB START
+    if(type %in% c("LagFused", "LagFusedZero")){
+      lambdaPhiseq <- .LambdaGridE(gran1, gran2, jj, fullY, fullZ, type, p, k,
                                    MN=F, alpha=1/(k+1), C=rep(1,p))
     }
     ### IMB END
@@ -360,8 +366,9 @@ HVAR_cv<-function(Y, p, h=1, lambdaPhiseq=NULL, gran1 = 10^2, gran2=10, T1.cutof
   ### ORIGINAL END
   
   ### IMB START
-  estim <- (type=="HLag")*2 + (type=="L1")*1 + (type=="LagFused")*3
+  estim <- (type=="HLag")*2 + (type=="L1")*1 + (type=="LagFused")*3 + (type=="LagFusedZero")*4
   ### IMB END
+  
   # Time-series cross-validation for tuning parameter selection
   my_cv <- HVAR_cvaux_loop_cpp(Y = fullY, Z = fullZ, tseq = tseq, gamm = lambdaPhiseq,  eps = eps, p = p, estim = estim)
   MSFEmatrix <- my_cv$MSFEcv
@@ -396,7 +403,7 @@ HVAR_cv<-function(Y, p, h=1, lambdaPhiseq=NULL, gran1 = 10^2, gran2=10, T1.cutof
   ### ORIGINAL END
   
   ### IMB START
-  if (type == "LagFused") {
+  if (type %in% c("LagFused", "LagFusedZero")) {
     # Paper 1-SE rule: select largest lambda within one standard error of minimum MSFE
     ok_idx <- which(MSFE_flagOK)
     if (length(ok_idx) > 0) {

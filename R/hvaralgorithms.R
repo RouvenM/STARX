@@ -76,6 +76,7 @@
 # }
 ### ORIGINAL END
 
+### IMB START
 .LambdaGridE <- function (gran1, gran2, jj = jj, Y, Z, group, p, k, MN, alpha, C)
 {
   if (group == "Basic"|group=="Tapered") {
@@ -90,46 +91,62 @@
     gamstart <- max(gmax)
   }
   
-  if (group == "LagFused") {
+  if (group %in% c("LagFused", "LagFusedZero")) {
     # Ensure Y is a matrix (handles k = 1) and center Y and Z as in VARLagFusedcpp
     Y_mat <- if (is.matrix(Y)) Y else matrix(Y, ncol = k)
     Y_c <- scale(Y_mat, center = TRUE, scale = FALSE)
     Z_c <- Z - rowMeans(Z)
     
-    # Build backward-cumulative lag blocks Z_tilde[[m]] = sum_{l=m}^p Z_c^(l)
-    Z_tilde <- vector("list", p)
-    Z_tilde[[p]] <- Z_c[((p - 1) * k + 1):(p * k), , drop = FALSE]
-    for (m in (p - 1):1) {
-      Z_m <- Z_c[((m - 1) * k + 1):(m * k), , drop = FALSE]
-      Z_tilde[[m]] <- Z_tilde[[m + 1]] + Z_m
-    }
-    
-    # Compute pooled OLS estimates (corresponds to fully fused model where delta^(2..p) = 0)
-    Z_pooled <- Z_tilde[[1]]
-    Phi_bar_t <- solve(Z_pooled %*% t(Z_pooled), Z_pooled %*% Y_c)
-    Res <- Y_c - t(Z_pooled) %*% Phi_bar_t
-    
-    # Exact KKT lambda_max: max_{i, m >= 2} || Z_tilde^(m) * r_i ||_2
-    gamstart <- 0
-    for (m in 2:p) {
-      G_m <- Z_tilde[[m]] %*% Res
-      max_norm_m <- max(sqrt(colSums(G_m^2)))
-      if (max_norm_m > gamstart) {
-        gamstart <- max_norm_m
+    if (group == "LagFused") {
+      # Build backward-cumulative lag blocks Z_tilde[[m]] = sum_{l=m}^p Z_c^(l)
+      Z_tilde <- vector("list", p)
+      Z_tilde[[p]] <- Z_c[((p - 1) * k + 1):(p * k), , drop = FALSE]
+      for (m in (p - 1):1) {
+        Z_m <- Z_c[((m - 1) * k + 1):(m * k), , drop = FALSE]
+        Z_tilde[[m]] <- Z_tilde[[m + 1]] + Z_m
+      }
+      
+      # Compute pooled OLS estimates (corresponds to fully fused model where delta^(2..p) = 0)
+      Z_pooled <- Z_tilde[[1]]
+      Phi_bar_t <- solve(Z_pooled %*% t(Z_pooled), Z_pooled %*% Y_c)
+      Res <- Y_c - t(Z_pooled) %*% Phi_bar_t
+      
+      # Exact KKT lambda_max: max_{i, m >= 2} || Z_tilde^(m) * r_i ||_2
+      gamstart <- 0
+      for (m in 2:p) {
+        G_m <- Z_tilde[[m]] %*% Res
+        max_norm_m <- max(sqrt(colSums(G_m^2)))
+        if (max_norm_m > gamstart) {
+          gamstart <- max_norm_m
+        }
+      }
+    } else {
+      # LagFusedZero: exact KKT lambda_max for Phi_1 = ... = Phi_p = 0
+      # Forward-cumulative lag blocks Z_cum^(j) = sum_{l=1}^j Z_c^(l)
+      Z_cum <- matrix(0, nrow = k, ncol = ncol(Z_c))
+      gamstart <- 0
+      for (j in 1:p) {
+        Z_j <- Z_c[((j - 1) * k + 1):(j * k), , drop = FALSE]
+        Z_cum <- Z_cum + Z_j
+        G_j <- Z_cum %*% Y_c
+        max_norm_j <- max(sqrt(colSums(G_j^2)))
+        if (max_norm_j > gamstart) {
+          gamstart <- max_norm_j
+        }
       }
     }
   }
-
+  
   if(group=="Tapered"){
     beta <- array(0,dim=c(k,k*p+1,10))
   }else{
     beta <- array(0,dim=c(k,k*p+1,1))
   }
- 
+  
   if (group == "HVARELEM" | group == "Basic") {
     estim <- ifelse(group == "Basic", 1, 2)
     gamstart <- LGSearch_cpp(gamstart, Y, Z, beta, estim, k, p)
-  } else if (group != "LagFused") {
+  } else if (!(group %in% c("LagFused", "LagFusedZero"))) {
     gamstart <- LGSearch(gamstart, Y, Z, beta, group, k, p, jj, MN, alpha, C)
   }
   

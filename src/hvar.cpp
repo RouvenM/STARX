@@ -159,16 +159,22 @@ arma::rowvec prox2(arma::colvec v,double lambda, int k,int p,uvec res1, arma::co
 
 // IMB START
 // Exact proximal operator for row-wise group lag fusion in difference coordinates:
-// Block 0 (lag 1) is unpenalized; blocks 1..(p-1) are lag differences delta^(l) = Phi^(l) - Phi^(l-1)
-arma::rowvec proxLagFused(const arma::colvec& v, const double lambda, const int k, const int p)
+// LagFused (zero_anchor = false): Block 0 (lag 1) is unpenalized; blocks 1..(p-1) are penalized.
+// LagFusedZero (zero_anchor = true): All blocks 0..(p-1) are penalized (lag differences + lag p toward zero).
+arma::rowvec proxLagFused(const arma::colvec& v, const double lambda, const int k, const int p,
+                          const bool zero_anchor = false)
 {
   arma::colvec v_out(v.n_elem, arma::fill::zeros);
   
-  // Lag 1 block (index 0) is unpenalized
-  v_out.subvec(0, k - 1) = v.subvec(0, k - 1);
+  int start_lag = 0;
+  if (!zero_anchor) {
+    // Lag 1 block (index 0) is unpenalized
+    v_out.subvec(0, k - 1) = v.subvec(0, k - 1);
+    start_lag = 1;
+  }
   
-  // Apply group soft-thresholding to each lag difference block l = 1, ..., p - 1
-  for (int l = 1; l < p; ++l) {
+  // Apply group soft-thresholding to penalized blocks
+  for (int l = start_lag; l < p; ++l) {
     int start_idx = l * k;
     int end_idx = (l + 1) * k - 1;
     arma::colvec block = v.subvec(start_idx, end_idx);
@@ -188,7 +194,8 @@ arma::rowvec proxLagFused(const arma::colvec& v, const double lambda, const int 
 // IMB START
 // Accelerated proximal gradient (FISTA) in reparameterized difference coordinates
 arma::mat FistaLagFused(const arma::mat& Y, const arma::mat& Z_tilde, const arma::mat& delta_init,
-                        const int p, const int k, const double lambda, const double eps, const double tk)
+                        const int p, const int k, const double lambda, const double eps, const double tk,
+                        const bool zero_anchor = false)
 {
   const int max_iter = 10000;
   arma::mat deltaFin = delta_init;
@@ -206,7 +213,7 @@ arma::mat FistaLagFused(const arma::mat& Y, const arma::mat& Z_tilde, const arma
       
       arma::colvec grad_step =
         arma::vectorise(v) + tk * arma::vectorise((arma::trans(Y.col(i)) - v * Z_tilde) * arma::trans(Z_tilde));
-      deltaR = proxLagFused(grad_step, tk * lambda, k, p);
+      deltaR = proxLagFused(grad_step, tk * lambda, k, p, zero_anchor);
       
       thresh = arma::max(arma::abs(deltaR - v));
       deltaOLDOLD = deltaOLD;
@@ -441,7 +448,7 @@ arma::cube gamloopLagFused(arma::cube& delta_cube, const arma::mat& Y, const arm
                            const arma::colvec& gammgrid, const double eps,
                            const arma::colvec& YMean2, const arma::colvec& ZMean2,
                            arma::mat& D1, const int k, const int p, const double tk,
-                           const int flag_restart_opt = 1)
+                           const int flag_restart_opt = 1, const bool zero_anchor = false)
 {
   arma::mat D1F2 = D1;
   int ngridpts = delta_cube.n_slices;
@@ -452,15 +459,25 @@ arma::cube gamloopLagFused(arma::cube& delta_cube, const arma::mat& Y, const arm
   for (int i = 0; i < ngridpts; ++i) {
     D1F2 = (flag_restart_opt == 1) ? D1 : delta_cube.slice(i);
     
-    // Optimize in difference coordinates (D1 stays in Delta-space for warm starts)
-    D1 = FistaLagFused(Y, Z_tilde, D1F2, p, k, gammgrid[i], eps, tk);
+    // Optimize in difference coordinates (D1 stays in difference space for warm starts)
+    D1 = FistaLagFused(Y, Z_tilde, D1F2, p, k, gammgrid[i], eps, tk, zero_anchor);
     
-    // Transform back from difference coordinates Delta to original lag matrices Phi
+    // Transform back from difference coordinates to original lag matrices Phi
     arma::mat Phi_est(k, k * p, arma::fill::zeros);
-    Phi_est.cols(0, k - 1) = D1.cols(0, k - 1);
-    for (int l = 1; l < p; ++l) {
-      Phi_est.cols(l * k, (l + 1) * k - 1) =
-        Phi_est.cols((l - 1) * k, l * k - 1) + D1.cols(l * k, (l + 1) * k - 1);
+    if (!zero_anchor) {
+      // LagFused: forward cumulative sum Phi_l = sum_{m=1}^{l} Delta_m
+      Phi_est.cols(0, k - 1) = D1.cols(0, k - 1);
+      for (int l = 1; l < p; ++l) {
+        Phi_est.cols(l * k, (l + 1) * k - 1) =
+          Phi_est.cols((l - 1) * k, l * k - 1) + D1.cols(l * k, (l + 1) * k - 1);
+      }
+    } else {
+      // LagFusedZero: backward cumulative sum Phi_l = sum_{m=l}^{p} Theta_m
+      Phi_est.cols((p - 1) * k, p * k - 1) = D1.cols((p - 1) * k, p * k - 1);
+      for (int l = p - 2; l >= 0; --l) {
+        Phi_est.cols(l * k, (l + 1) * k - 1) =
+          Phi_est.cols((l + 1) * k, (l + 2) * k - 1) + D1.cols(l * k, (l + 1) * k - 1);
+      }
     }
     
     // Reconstruct unpenalized intercept using original Z means
@@ -578,7 +595,7 @@ arma::cube HVARElemAlgcpp(const arma::cube &beta, const arma::mat& trainY, const
 // [[Rcpp::export]]
 arma::cube VARLagFusedcpp(const arma::cube& beta, const arma::mat& trainY, const arma::mat& trainZ,
                           const arma::colvec& lambda, const double& tol, const int& p,
-                          const int flag_restart_opt = 0)
+                          const int flag_restart_opt = 0, const bool zero_anchor = false)
 {
   int n = trainY.n_rows;
   int k = trainY.n_cols;
@@ -596,13 +613,22 @@ arma::cube VARLagFusedcpp(const arma::cube& beta, const arma::mat& trainY, const
   }
   Z = Z.t();
   
-  // Build backward-cumulative regressor matrix Z_tilde for difference reparameterization:
-  // Z_tilde^(m) = sum_{l=m}^{p} Z^(l)
+  // Build cumulative regressor matrix Z_tilde for difference reparameterization:
+  // LagFused:     backward-cumulative Z_tilde^(m) = sum_{l=m}^{p} Z^(l)
+  // LagFusedZero: forward-cumulative  Z_tilde^(m) = sum_{l=1}^{m} Z^(l)
   arma::mat Z_tilde(k * p, n, arma::fill::zeros);
-  Z_tilde.rows((p - 1) * k, p * k - 1) = Z.rows((p - 1) * k, p * k - 1);
-  for (int l = p - 2; l >= 0; --l) {
-    Z_tilde.rows(l * k, (l + 1) * k - 1) =
-      Z_tilde.rows((l + 1) * k, (l + 2) * k - 1) + Z.rows(l * k, (l + 1) * k - 1);
+  if (!zero_anchor) {
+    Z_tilde.rows((p - 1) * k, p * k - 1) = Z.rows((p - 1) * k, p * k - 1);
+    for (int l = p - 2; l >= 0; --l) {
+      Z_tilde.rows(l * k, (l + 1) * k - 1) =
+        Z_tilde.rows((l + 1) * k, (l + 2) * k - 1) + Z.rows(l * k, (l + 1) * k - 1);
+    }
+  } else {
+    Z_tilde.rows(0, k - 1) = Z.rows(0, k - 1);
+    for (int l = 1; l < p; ++l) {
+      Z_tilde.rows(l * k, (l + 1) * k - 1) =
+        Z_tilde.rows((l - 1) * k, l * k - 1) + Z.rows(l * k, (l + 1) * k - 1);
+    }
   }
   
   // Compute Lipschitz step size from Z_tilde * Z_tilde^T
@@ -612,23 +638,34 @@ arma::cube VARLagFusedcpp(const arma::cube& beta, const arma::mat& trainY, const
   arma::eig_sym(eigval, eigvec, Zt_tilde);
   double tk = 1.0 / arma::max(eigval);
   
-  // Convert initial/warm-start Phi slices into difference coordinates Delta
+  // Convert initial/warm-start Phi slices into difference coordinates
   arma::cube betaini = beta.subcube(0, 1, 0, k - 1, k * p, g - 1);
   arma::cube deltainit(k, k * p, g, arma::fill::zeros);
   for (int s = 0; s < g; ++s) {
     arma::mat Phi_s = betaini.slice(s);
     arma::mat Delta_s(k, k * p, arma::fill::zeros);
-    Delta_s.cols(0, k - 1) = Phi_s.cols(0, k - 1);
-    for (int l = 1; l < p; ++l) {
-      Delta_s.cols(l * k, (l + 1) * k - 1) =
-        Phi_s.cols(l * k, (l + 1) * k - 1) - Phi_s.cols((l - 1) * k, l * k - 1);
+    if (!zero_anchor) {
+      // Forward differences: Delta_1 = Phi_1, Delta_l = Phi_l - Phi_{l-1}
+      Delta_s.cols(0, k - 1) = Phi_s.cols(0, k - 1);
+      for (int l = 1; l < p; ++l) {
+        Delta_s.cols(l * k, (l + 1) * k - 1) =
+          Phi_s.cols(l * k, (l + 1) * k - 1) - Phi_s.cols((l - 1) * k, l * k - 1);
+      }
+    } else {
+      // Backward differences: Theta_l = Phi_l - Phi_{l+1} (l < p), Theta_p = Phi_p
+      for (int l = 0; l < p - 1; ++l) {
+        Delta_s.cols(l * k, (l + 1) * k - 1) =
+          Phi_s.cols(l * k, (l + 1) * k - 1) - Phi_s.cols((l + 1) * k, (l + 2) * k - 1);
+      }
+      Delta_s.cols((p - 1) * k, p * k - 1) = Phi_s.cols((p - 1) * k, p * k - 1);
     }
     deltainit.slice(s) = Delta_s;
   }
   arma::mat deltainit1 = deltainit.slice(0);
   
   arma::cube betaout = gamloopLagFused(deltainit, Y, Z_tilde, lambda, tol,
-                                       YMean.t(), ZMean.t(), deltainit1, k, p, tk, flag_restart_opt);
+                                       YMean.t(), ZMean.t(), deltainit1, k, p, tk,
+                                       flag_restart_opt, zero_anchor);
   
   return betaout;
 }
@@ -658,9 +695,10 @@ cv_aux_out HVAR_cvaux_cpp(const arma::mat & Y, const arma::mat& Z, int t, const 
   }
   
   // IMB START
-  // LagFused branch for cross-validation (estim == 3)
-  if(estim==3){
-    Phi  = VARLagFusedcpp(Phi, trainY, trainZ, gamm, eps, p, flag_restart_opt);
+  // LagFused (estim == 3) and LagFusedZero (estim == 4) branch for cross-validation
+  if (estim == 3 || estim == 4) {
+    const bool zero_anchor = (estim == 4);
+    Phi = VARLagFusedcpp(Phi, trainY, trainZ, gamm, eps, p, flag_restart_opt, zero_anchor);
   }
   // IMB END
   
@@ -681,7 +719,7 @@ cv_aux_out HVAR_cvaux_cpp(const arma::mat & Y, const arma::mat& Z, int t, const 
     arma::mat diff = testY.t() - pred;
     MSFE.col(igran) = mean(pow(diff, 2));
     
-    if (estim == 3) {
+    if (estim == 3 || estim == 4) {
       // Count active (non-fused) row-wise transitions between adjacent lags
       arma::mat Phi_gran = betagran.cols(1, k * p);
       int active_transitions = 0;
@@ -691,6 +729,13 @@ cv_aux_out HVAR_cvaux_cpp(const arma::mat & Y, const arma::mat& Z, int t, const 
             Phi_gran.submat(i, l * k, i, (l + 1) * k - 1) -
             Phi_gran.submat(i, (l - 1) * k, i, l * k - 1);
           if (arma::norm(diff_lag, 2) > 1e-8) {
+            active_transitions += 1;
+          }
+        }
+        // For LagFusedZero, also count the transition from lag p to the implicit zero matrix at lag p+1
+        if (estim == 4) {
+          arma::rowvec last_lag = Phi_gran.submat(i, (p - 1) * k, i, p * k - 1);
+          if (arma::norm(last_lag, 2) > 1e-8) {
             active_transitions += 1;
           }
         }
