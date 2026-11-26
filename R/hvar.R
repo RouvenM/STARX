@@ -245,7 +245,7 @@ sparseVAR <- function(Y, p=NULL, VARpen="HLag", VARlseq=NULL, VARgran=NULL,
     Phihat <- if (ncol(Y) == 1) matrix(out$Phihat, nrow = 1) else out$Phihat
     out$Phihat <- Phihat
   }
-
+  out$VARpen <- VARpen
   out
 }
 

@@ -63,13 +63,12 @@ image_cv <- function(fit, xlab = "lambda_B", ylab = "lambda_Phi") {
   points(fit$lambdaB_SEopt, fit$lambdaPhi_SEopt, pch = 19)
 }
 
-### IMB START
 #' Plot Cross-Validation Error Curve via ggplot2
 #'
-#' Plots the cross-validation error (MSFE) across the lambda grid with error bars (standard error)
-#' in light grey tones, with high-contrast vertical lines for optimal and 1-SE optimal lambdas.
+#' Plots the cross-validation error (MSFE) across the lambda grid with standard error bars
+#' and vertical reference lines for the optimal and 1-SE lambda values.
 #'
-#' @param fit A fitted object returned by \code{\link{sparseVAR}} (or \code{cv.sparseVAR}) 
+#' @param fit A fitted object returned by \code{\link{sparseVAR}} (or \code{cv.sparseVAR})
 #'   with class \code{"bigtime.VAR"}.
 #' @param log_lambda Logical; if \code{TRUE}, the x-axis displays \eqn{\log(\lambda)}. Defaults to \code{TRUE}.
 #' @param ... Additional arguments (currently unused).
@@ -80,7 +79,6 @@ image_cv <- function(fit, xlab = "lambda_B", ylab = "lambda_Phi") {
 #' @importFrom ggplot2 ggplot aes geom_line geom_pointrange geom_vline labs theme_minimal
 plot_cv_gg2 <- function(fit, log_lambda = TRUE, ...) {
   
-  # 1. Input checks
   if (!inherits(fit, "bigtime.VAR")) {
     stop("Currently only objects of class 'bigtime.VAR' are supported by plot_cv_gg2.")
   }
@@ -94,8 +92,8 @@ plot_cv_gg2 <- function(fit, log_lambda = TRUE, ...) {
     stop("No lambda grid found in the provided fit object.")
   }
   
-  # 2. Compute mean CV error (MSFE) and Standard Error
-  m <- fit$MSFEcv
+  # Compute mean CV error (MSFE) and standard error across validation points
+  m <- unname(fit$MSFEcv)
   se <- apply(fit$MSFE_all, 2, stats::sd) / sqrt(nrow(fit$MSFE_all))
   
   plot_data <- data.frame(
@@ -105,20 +103,28 @@ plot_cv_gg2 <- function(fit, log_lambda = TRUE, ...) {
     upper = m + se
   )
   
-  # 3. Handle x-axis scaling
+  # Extract CV-selected lambdas if available
+  opt_val <- if (!is.null(fit$lambda_opt) && length(fit$lambda_opt) == 1 && !is.na(fit$lambda_opt)) {
+    fit$lambda_opt
+  } else {
+    NULL
+  }
+  se_opt_val <- if (!is.null(fit$lambda_SEopt) && length(fit$lambda_SEopt) == 1 && !is.na(fit$lambda_SEopt)) {
+    fit$lambda_SEopt
+  } else {
+    NULL
+  }
+  
   if (log_lambda) {
     plot_data$x_val <- log(plot_data$lambda)
     x_label <- expression(log(lambda))
-    opt_val <- if (!is.null(fit$lambda_opt)) log(fit$lambda_opt) else NULL
-    se_opt_val <- if (!is.null(fit$lambda_SEopt) && !is.na(fit$lambda_SEopt)) log(fit$lambda_SEopt) else NULL
+    if (!is.null(opt_val)) opt_val <- log(opt_val)
+    if (!is.null(se_opt_val)) se_opt_val <- log(se_opt_val)
   } else {
     plot_data$x_val <- plot_data$lambda
     x_label <- expression(lambda)
-    opt_val <- fit$lambda_opt
-    se_opt_val <- fit$lambda_SEopt
   }
   
-  # 4. Construct plot (Light grey curve with dark red/navy lambda lines)
   p_obj <- ggplot2::ggplot(plot_data, ggplot2::aes(x = x_val, y = msfe)) +
     ggplot2::geom_line(color = "grey65", linewidth = 0.7) +
     ggplot2::geom_pointrange(
@@ -135,16 +141,13 @@ plot_cv_gg2 <- function(fit, log_lambda = TRUE, ...) {
     ) +
     ggplot2::theme_minimal()
   
-  # Optimal lambda (dunkelrot, gestrichelt)
+  # Add vertical reference lines for optimal (dashed) and 1-SE (dotted) lambda
   if (!is.null(opt_val)) {
     p_obj <- p_obj + ggplot2::geom_vline(xintercept = opt_val, linetype = "dashed", color = "black", linewidth = 1.1)
   }
-  
-  # 1-SE optimal lambda (marineblau, gepunktet)
   if (!is.null(se_opt_val)) {
     p_obj <- p_obj + ggplot2::geom_vline(xintercept = se_opt_val, linetype = "dotted", color = "black", linewidth = 1.1)
   }
   
   return(p_obj)
 }
-### IMB END

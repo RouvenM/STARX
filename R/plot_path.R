@@ -3,10 +3,11 @@
 #' Re-fits the sparse VAR model over the saved lambda grid and plots the Frobenius
 #' norm of each lag matrix \eqn{\Phi^{(\ell)}} as a function of \eqn{\lambda}.
 #'
-#' @param fit A fitted object returned by \code{\link{sparseVAR}} (or \code{cv.sparseVAR}) 
+#' @param fit A fitted object returned by \code{\link{sparseVAR}} (or \code{cv.sparseVAR})
 #'   with class \code{"bigtime.VAR"}.
 #' @param Y Optional numeric matrix of time series data. If \code{NULL}, uses \code{fit$Y}.
-#' @param VARpen Character string specifying the VAR penalty. Defaults to \code{"LagFused"}.
+#' @param VARpen Optional character string specifying the VAR penalty. If \code{NULL},
+#'   uses \code{fit$VARpen}.
 #' @param log_lambda Logical; if \code{TRUE}, the x-axis displays \eqn{\log(\lambda)}. Defaults to \code{TRUE}.
 #' @param ... Additional arguments passed down to \code{\link{sparseVAR}}.
 #'
@@ -14,13 +15,19 @@
 #' @export
 #'
 #' @importFrom ggplot2 ggplot aes geom_line geom_vline labs theme_minimal
-plot_frobenius_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lambda = TRUE, ...) {
+plot_frobenius_path <- function(fit, Y = NULL, VARpen = NULL, log_lambda = TRUE, ...) {
   
-  # 1. Extract required components from fit object
   if (is.null(Y)) {
     Y <- fit$Y
     if (is.null(Y)) {
       stop("Data matrix Y was not found in 'fit' object. Please provide Y explicitly.")
+    }
+  }
+  
+  if (is.null(VARpen)) {
+    VARpen <- fit$VARpen
+    if (is.null(VARpen)) {
+      stop("VAR penalty was not found in 'fit' object. Please provide 'VARpen' explicitly.")
     }
   }
   
@@ -32,13 +39,12 @@ plot_frobenius_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lambda =
   p <- fit$p
   k <- fit$k
   
-  # 2. Re-fit models across lambda grid using VARlseq = l
+  # Refit across the lambda grid and compute the Frobenius norm of each lag matrix
   norm_list <- lapply(lambda_grid, function(l) {
-    
     fit_l <- sparseVAR(
-      Y = Y, 
-      p = p, 
-      VARpen = VARpen, 
+      Y = Y,
+      p = p,
+      VARpen = VARpen,
       VARlseq = l,
       selection = "none",
       ...
@@ -46,7 +52,7 @@ plot_frobenius_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lambda =
     
     phi_mat <- fit_l$Phihat
     if (length(dim(phi_mat)) == 3) {
-      phi_mat <- phi_mat[, , 1, drop = TRUE]
+      phi_mat <- matrix(phi_mat[, , 1], nrow = k, ncol = k * p)
     }
     
     lag_norms <- numeric(p)
@@ -72,20 +78,28 @@ plot_frobenius_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lambda =
   
   plot_data <- do.call(rbind, norm_list)
   
-  # 3. Handle x-axis scaling
+  # Extract CV-selected lambdas if available
+  opt_val <- if (!is.null(fit$lambda_opt) && length(fit$lambda_opt) == 1 && !is.na(fit$lambda_opt)) {
+    fit$lambda_opt
+  } else {
+    NULL
+  }
+  se_opt_val <- if (!is.null(fit$lambda_SEopt) && length(fit$lambda_SEopt) == 1 && !is.na(fit$lambda_SEopt)) {
+    fit$lambda_SEopt
+  } else {
+    NULL
+  }
+  
   if (log_lambda) {
     plot_data$x_val <- log(plot_data$lambda)
     x_label <- expression(log(lambda))
-    opt_val <- if (!is.null(fit$lambda_opt)) log(fit$lambda_opt) else NULL
-    se_opt_val <- if (!is.null(fit$lambda_SEopt) && !is.na(fit$lambda_SEopt)) log(fit$lambda_SEopt) else NULL
+    if (!is.null(opt_val)) opt_val <- log(opt_val)
+    if (!is.null(se_opt_val)) se_opt_val <- log(se_opt_val)
   } else {
     plot_data$x_val <- plot_data$lambda
     x_label <- expression(lambda)
-    opt_val <- fit$lambda_opt
-    se_opt_val <- fit$lambda_SEopt
   }
   
-  # 4. Construct plot
   p_obj <- ggplot2::ggplot(plot_data, ggplot2::aes(x = x_val, y = frobenius_norm, color = lag)) +
     ggplot2::geom_line(linewidth = 1) +
     ggplot2::labs(
@@ -96,12 +110,10 @@ plot_frobenius_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lambda =
     ) +
     ggplot2::theme_minimal()
   
-  # Optimal lambda (rot, gestrichelt, dicker)
+  # Add vertical reference lines for optimal (dashed) and 1-SE (dotted) lambda
   if (!is.null(opt_val)) {
     p_obj <- p_obj + ggplot2::geom_vline(xintercept = opt_val, linetype = "dashed", color = "black", linewidth = 1.1)
   }
-  
-  # 1-SE optimal lambda (blau, gepunktet, dicker)
   if (!is.null(se_opt_val)) {
     p_obj <- p_obj + ggplot2::geom_vline(xintercept = se_opt_val, linetype = "dotted", color = "black", linewidth = 1.1)
   }
@@ -115,10 +127,11 @@ plot_frobenius_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lambda =
 #' Re-fits the sparse VAR model over the saved lambda grid and plots the row-wise
 #' Frobenius (L2) norms for each row of each lag matrix \eqn{\Phi^{(\ell)}} as a function of \eqn{\lambda}.
 #'
-#' @param fit A fitted object returned by \code{\link{sparseVAR}} (or \code{cv.sparseVAR}) 
+#' @param fit A fitted object returned by \code{\link{sparseVAR}} (or \code{cv.sparseVAR})
 #'   with class \code{"bigtime.VAR"}.
 #' @param Y Optional numeric matrix of time series data. If \code{NULL}, uses \code{fit$Y}.
-#' @param VARpen Character string specifying the VAR penalty. Defaults to \code{"LagFused"}.
+#' @param VARpen Optional character string specifying the VAR penalty. If \code{NULL},
+#'   uses \code{fit$VARpen}.
 #' @param log_lambda Logical; if \code{TRUE}, the x-axis displays \eqn{\log(\lambda)}. Defaults to \code{TRUE}.
 #' @param ... Additional arguments passed down to \code{\link{sparseVAR}}.
 #'
@@ -126,13 +139,19 @@ plot_frobenius_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lambda =
 #' @export
 #'
 #' @importFrom ggplot2 ggplot aes geom_line geom_vline labs theme_minimal facet_wrap
-plot_row_frobenius_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lambda = TRUE, ...) {
+plot_row_frobenius_path <- function(fit, Y = NULL, VARpen = NULL, log_lambda = TRUE, ...) {
   
-  # 1. Extract required components
   if (is.null(Y)) {
     Y <- fit$Y
     if (is.null(Y)) {
       stop("Data matrix Y was not found in 'fit' object. Please provide Y explicitly.")
+    }
+  }
+  
+  if (is.null(VARpen)) {
+    VARpen <- fit$VARpen
+    if (is.null(VARpen)) {
+      stop("VAR penalty was not found in 'fit' object. Please provide 'VARpen' explicitly.")
     }
   }
   
@@ -145,13 +164,12 @@ plot_row_frobenius_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lamb
   k <- fit$k
   series_names <- if (!is.null(fit$series_names)) fit$series_names else paste0("Row ", seq_len(k))
   
-  # 2. Re-fit models across lambda grid and compute row norms
+  # Refit across the lambda grid and compute row-wise L2 norms for each lag matrix
   norm_list <- lapply(lambda_grid, function(l) {
-    
     fit_l <- sparseVAR(
-      Y = Y, 
-      p = p, 
-      VARpen = VARpen, 
+      Y = Y,
+      p = p,
+      VARpen = VARpen,
       VARlseq = l,
       selection = "none",
       ...
@@ -159,7 +177,7 @@ plot_row_frobenius_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lamb
     
     phi_mat <- fit_l$Phihat
     if (length(dim(phi_mat)) == 3) {
-      phi_mat <- phi_mat[, , 1, drop = TRUE]
+      phi_mat <- matrix(phi_mat[, , 1], nrow = k, ncol = k * p)
     }
     
     grid_rows <- list()
@@ -173,8 +191,7 @@ plot_row_frobenius_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lamb
         stop("Unexpected structure in fit_l$Phihat.")
       }
       
-      # Compute L2 norm for each row
-      row_norms <- apply(phi_lag, 1, function(row) norm(matrix(row, nrow = 1), type = "F"))
+      row_norms <- sqrt(rowSums(phi_lag^2))
       
       grid_rows[[lag]] <- data.frame(
         lambda = l,
@@ -189,20 +206,28 @@ plot_row_frobenius_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lamb
   
   plot_data <- do.call(rbind, norm_list)
   
-  # 3. Handle x-axis scaling
+  # Extract CV-selected lambdas if available
+  opt_val <- if (!is.null(fit$lambda_opt) && length(fit$lambda_opt) == 1 && !is.na(fit$lambda_opt)) {
+    fit$lambda_opt
+  } else {
+    NULL
+  }
+  se_opt_val <- if (!is.null(fit$lambda_SEopt) && length(fit$lambda_SEopt) == 1 && !is.na(fit$lambda_SEopt)) {
+    fit$lambda_SEopt
+  } else {
+    NULL
+  }
+  
   if (log_lambda) {
     plot_data$x_val <- log(plot_data$lambda)
     x_label <- expression(log(lambda))
-    opt_val <- if (!is.null(fit$lambda_opt)) log(fit$lambda_opt) else NULL
-    se_opt_val <- if (!is.null(fit$lambda_SEopt) && !is.na(fit$lambda_SEopt)) log(fit$lambda_SEopt) else NULL
+    if (!is.null(opt_val)) opt_val <- log(opt_val)
+    if (!is.null(se_opt_val)) se_opt_val <- log(se_opt_val)
   } else {
     plot_data$x_val <- plot_data$lambda
     x_label <- expression(lambda)
-    opt_val <- fit$lambda_opt
-    se_opt_val <- fit$lambda_SEopt
   }
   
-  # 4. Construct plot with facetting by Target Variable (Row) and color by Lag
   p_obj <- ggplot2::ggplot(plot_data, ggplot2::aes(x = x_val, y = row_norm, color = lag)) +
     ggplot2::geom_line(linewidth = 1) +
     ggplot2::facet_wrap(~ row_variable) +
@@ -214,12 +239,10 @@ plot_row_frobenius_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lamb
     ) +
     ggplot2::theme_minimal()
   
-  # Optimal lambda (schwarz, gestrichelt, dicker)
+  # Add vertical reference lines for optimal (dashed) and 1-SE (dotted) lambda
   if (!is.null(opt_val)) {
     p_obj <- p_obj + ggplot2::geom_vline(xintercept = opt_val, linetype = "dashed", color = "black", linewidth = 1.1)
   }
-  
-  # 1-SE optimal lambda (schwarz, gepunktet, dicker)
   if (!is.null(se_opt_val)) {
     p_obj <- p_obj + ggplot2::geom_vline(xintercept = se_opt_val, linetype = "dotted", color = "black", linewidth = 1.1)
   }
@@ -228,16 +251,16 @@ plot_row_frobenius_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lamb
 }
 
 
-
 #' Plot Individual Coefficient Paths Across Lambda
 #'
 #' Re-fits the sparse VAR model over the saved lambda grid and plots the raw coefficient
 #' values \eqn{\phi_{ij}^{(\ell)}} for each variable pair as a function of \eqn{\lambda}.
 #'
-#' @param fit A fitted object returned by \code{\link{sparseVAR}} (or \code{cv.sparseVAR}) 
+#' @param fit A fitted object returned by \code{\link{sparseVAR}} (or \code{cv.sparseVAR})
 #'   with class \code{"bigtime.VAR"}.
 #' @param Y Optional numeric matrix of time series data. If \code{NULL}, uses \code{fit$Y}.
-#' @param VARpen Character string specifying the VAR penalty. Defaults to \code{"LagFused"}.
+#' @param VARpen Optional character string specifying the VAR penalty. If \code{NULL},
+#'   uses \code{fit$VARpen}.
 #' @param log_lambda Logical; if \code{TRUE}, the x-axis displays \eqn{\log(\lambda)}. Defaults to \code{TRUE}.
 #' @param ... Additional arguments passed down to \code{\link{sparseVAR}}.
 #'
@@ -245,13 +268,19 @@ plot_row_frobenius_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lamb
 #' @export
 #'
 #' @importFrom ggplot2 ggplot aes geom_line geom_hline geom_vline labs theme_minimal facet_wrap
-plot_coefficient_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lambda = TRUE, ...) {
+plot_coefficient_path <- function(fit, Y = NULL, VARpen = NULL, log_lambda = TRUE, ...) {
   
-  # 1. Extract required components
   if (is.null(Y)) {
     Y <- fit$Y
     if (is.null(Y)) {
       stop("Data matrix Y was not found in 'fit' object. Please provide Y explicitly.")
+    }
+  }
+  
+  if (is.null(VARpen)) {
+    VARpen <- fit$VARpen
+    if (is.null(VARpen)) {
+      stop("VAR penalty was not found in 'fit' object. Please provide 'VARpen' explicitly.")
     }
   }
   
@@ -264,13 +293,12 @@ plot_coefficient_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lambda
   k <- fit$k
   series_names <- if (!is.null(fit$series_names)) fit$series_names else paste0("Y", seq_len(k))
   
-  # 2. Re-fit models across lambda grid and extract raw coefficients
+  # Refit across the lambda grid and extract raw coefficients for each variable pair
   coef_list <- lapply(lambda_grid, function(l) {
-    
     fit_l <- sparseVAR(
-      Y = Y, 
-      p = p, 
-      VARpen = VARpen, 
+      Y = Y,
+      p = p,
+      VARpen = VARpen,
       VARlseq = l,
       selection = "none",
       ...
@@ -278,7 +306,7 @@ plot_coefficient_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lambda
     
     phi_mat <- fit_l$Phihat
     if (length(dim(phi_mat)) == 3) {
-      phi_mat <- phi_mat[, , 1, drop = TRUE]
+      phi_mat <- matrix(phi_mat[, , 1], nrow = k, ncol = k * p)
     }
     
     grid_coefs <- list()
@@ -292,7 +320,6 @@ plot_coefficient_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lambda
         stop("Unexpected structure in fit_l$Phihat.")
       }
       
-      # Extract each element (i, j)
       for (i in seq_len(k)) {
         for (j in seq_len(k)) {
           pair_label <- paste0(series_names[j], " -> ", series_names[i])
@@ -312,20 +339,28 @@ plot_coefficient_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lambda
   
   plot_data <- do.call(rbind, coef_list)
   
-  # 3. Handle x-axis scaling
+  # Extract CV-selected lambdas if available
+  opt_val <- if (!is.null(fit$lambda_opt) && length(fit$lambda_opt) == 1 && !is.na(fit$lambda_opt)) {
+    fit$lambda_opt
+  } else {
+    NULL
+  }
+  se_opt_val <- if (!is.null(fit$lambda_SEopt) && length(fit$lambda_SEopt) == 1 && !is.na(fit$lambda_SEopt)) {
+    fit$lambda_SEopt
+  } else {
+    NULL
+  }
+  
   if (log_lambda) {
     plot_data$x_val <- log(plot_data$lambda)
     x_label <- expression(log(lambda))
-    opt_val <- if (!is.null(fit$lambda_opt)) log(fit$lambda_opt) else NULL
-    se_opt_val <- if (!is.null(fit$lambda_SEopt) && !is.na(fit$lambda_SEopt)) log(fit$lambda_SEopt) else NULL
+    if (!is.null(opt_val)) opt_val <- log(opt_val)
+    if (!is.null(se_opt_val)) se_opt_val <- log(se_opt_val)
   } else {
     plot_data$x_val <- plot_data$lambda
     x_label <- expression(lambda)
-    opt_val <- fit$lambda_opt
-    se_opt_val <- fit$lambda_SEopt
   }
   
-  # 4. Construct plot with facetting by variable pair (Source -> Target)
   p_obj <- ggplot2::ggplot(plot_data, ggplot2::aes(x = x_val, y = value, color = lag)) +
     ggplot2::geom_hline(yintercept = 0, color = "gray60", linetype = "solid", linewidth = 0.4) +
     ggplot2::geom_line(linewidth = 0.8) +
@@ -338,12 +373,10 @@ plot_coefficient_path <- function(fit, Y = NULL, VARpen = "LagFused", log_lambda
     ) +
     ggplot2::theme_minimal()
   
-  # Optimal lambda (schwarz, gestrichelt, dicker)
+  # Add vertical reference lines for optimal (dashed) and 1-SE (dotted) lambda
   if (!is.null(opt_val)) {
     p_obj <- p_obj + ggplot2::geom_vline(xintercept = opt_val, linetype = "dashed", color = "black", linewidth = 1.1)
   }
-  
-  # 1-SE optimal lambda (schwarz, gepunktet, dicker)
   if (!is.null(se_opt_val)) {
     p_obj <- p_obj + ggplot2::geom_vline(xintercept = se_opt_val, linetype = "dotted", color = "black", linewidth = 1.1)
   }
