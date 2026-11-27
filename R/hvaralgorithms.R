@@ -76,6 +76,7 @@
 # }
 ### ORIGINAL END
 
+### IMB START
 .LambdaGridE <- function (gran1, gran2, jj = jj, Y, Z, group, p, k, MN, alpha, C)
 {
   if (group == "Basic"|group=="Tapered") {

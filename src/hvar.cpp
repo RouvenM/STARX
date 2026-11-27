@@ -220,6 +220,133 @@ arma::mat FistaLagFused(const arma::mat& Y, const arma::mat& Z_tilde, const arma
 }
 // IMB END
 
+// IMB START
+// Lag-difference operator D: (D * phi)^{(m)} = phi^{(m+1)} - phi^{(m)}, m = 0..p-2
+inline arma::colvec applyLagDiff(const arma::colvec& phi, const int k, const int p)
+{
+  arma::colvec out(k * (p - 1));
+  for (int m = 0; m < p - 1; ++m) {
+    out.subvec(m * k, (m + 1) * k - 1) =
+      phi.subvec((m + 1) * k, (m + 2) * k - 1) - phi.subvec(m * k, (m + 1) * k - 1);
+  }
+  return out;
+}
+
+// Adjoint operator D^T for lag-difference operator D
+inline arma::colvec applyLagDiffAdj(const arma::colvec& u, const int k, const int p)
+{
+  arma::colvec out(k * p);
+  out.subvec(0, k - 1) = -u.subvec(0, k - 1);
+  for (int l = 1; l < p - 1; ++l) {
+    out.subvec(l * k, (l + 1) * k - 1) =
+      u.subvec((l - 1) * k, l * k - 1) - u.subvec(l * k, (l + 1) * k - 1);
+  }
+  out.subvec((p - 1) * k, p * k - 1) = u.subvec((p - 2) * k, (p - 1) * k - 1);
+  return out;
+}
+
+// Block-wise projection onto Euclidean ball of radius lambda2 (prox of sigma * h*)
+inline arma::colvec projLagFusedDual(const arma::colvec& w, const double lambda2, const int k, const int p)
+{
+  arma::colvec out(w.n_elem, arma::fill::zeros);
+  if (lambda2 <= 0.0) {
+    return out;
+  }
+  for (int m = 0; m < p - 1; ++m) {
+    int s = m * k;
+    int e = (m + 1) * k - 1;
+    arma::colvec block = w.subvec(s, e);
+    double bn = arma::norm(block, 2);
+    if (bn > lambda2) {
+      out.subvec(s, e) = (lambda2 / bn) * block;
+    } else {
+      out.subvec(s, e) = block;
+    }
+  }
+  return out;
+}
+
+// Condat-Vu primal-dual splitting solver for combined HLag (lambda1) + LagFused (lambda2) penalty:
+// min_phi 0.5 * ||y_i - Z^T phi||_2^2 + lambda1 * P_HLag(phi) + lambda2 * P_LagFused(D * phi)
+arma::mat CondatVuHLagFused(const arma::mat& Y, const arma::mat& Z, const arma::mat& Zt,
+                            const arma::mat& phi_init, const int p, const int k,
+                            const double lambda1, const double lambda2,
+                            const double eps, const double L)
+{
+  const int max_iter = 50000;
+  const int n = Y.n_rows;
+  const int kp = k * p;
+  const bool use_gram = (kp <= n);
+  
+  arma::mat ZY;
+  if (use_gram) {
+    ZY = Z * Y;
+  }
+  
+  // Exact operator norm squared of D: ||D||_2^2 = 4 * cos^2(pi / (2 * p))
+  // Step sizes satisfy Condat-Vu condition: tau * (L / 2 + sigma * ||D||_2^2) = 0.9 < 1
+  const double D_norm2 = (p > 1) ? (4.0 * std::pow(std::cos(arma::datum::pi / (2.0 * p)), 2)) : 1.0;
+  const double tau = 0.9 / L;
+  const double sigma = 0.5 * L / D_norm2;
+  
+  uvec res1 = ind(p, 0);
+  arma::colvec w(p, arma::fill::ones);
+  
+  arma::mat phiFin = phi_init;
+  const bool use_fused = (p > 1 && lambda2 > 0.0);
+  const bool use_hlag = (lambda1 > 0.0 && tau * lambda1 > 1e-15);
+  
+  for (int i = 0; i < k; ++i) {
+    arma::colvec phi_old = arma::trans(phi_init.row(i));
+    arma::colvec u_old;
+    if (use_fused) {
+      u_old.zeros(k * (p - 1));
+    }
+    
+    int iter = 0;
+    double thresh = 10.0 * eps;
+    
+    while (thresh > eps && iter < max_iter) {
+      arma::colvec grad;
+      if (use_gram) {
+        grad = Zt * phi_old - ZY.col(i);
+      } else {
+        grad = Z * (arma::trans(Z) * phi_old - Y.col(i));
+      }
+      
+      arma::colvec phi_step = phi_old - tau * grad;
+      if (use_fused) {
+        phi_step -= tau * applyLagDiffAdj(u_old, k, p);
+      }
+      
+      arma::colvec phi_new;
+      if (use_hlag) {
+        phi_new = arma::trans(prox2(phi_step, tau * lambda1, k, p, res1, w));
+      } else {
+        phi_new = phi_step;
+      }
+      
+      double dual_diff = 0.0;
+      if (use_fused) {
+        arma::colvec phi_bar = 2.0 * phi_new - phi_old;
+        arma::colvec u_new = projLagFusedDual(u_old + sigma * applyLagDiff(phi_bar, k, p), lambda2, k, p);
+        dual_diff = arma::max(arma::abs(u_new - u_old)) / sigma;
+        u_old = u_new;
+      }
+      
+      double primal_diff = arma::max(arma::abs(phi_new - phi_old));
+      thresh = std::max(primal_diff, dual_diff);
+      phi_old = phi_new;
+      ++iter;
+    }
+    
+    phiFin.row(i) = arma::trans(phi_old);
+  }
+  
+  return phiFin;
+}
+// IMB END
+
 // [[Rcpp::export]]
 arma::mat FistaElem(const arma::mat& Y,const arma::mat& Z, arma::mat phi, const int p,const int k,double lambda, const double eps,const double tk)
 {
@@ -472,6 +599,42 @@ arma::cube gamloopLagFused(arma::cube& delta_cube, const arma::mat& Y, const arm
 }
 // IMB END
 
+// IMB START
+// Loop over 2D (lambda1, lambda2) grid using Condat-Vu primal-dual solver
+arma::cube gamloopHLagFused(arma::cube& bcube, const arma::mat& Y, const arma::mat& Z,
+                            const arma::mat& Zt, const arma::colvec& gammgrid1,
+                            const arma::colvec& gammgrid2, const double eps,
+                            const arma::colvec& YMean2, const arma::colvec& ZMean2,
+                            arma::mat& B1, const int k, const int p, const double L,
+                            const int flag_restart_opt = 1)
+{
+  int ngridpts = bcube.n_slices;
+  arma::cube bcube2(k, k * p + 1, ngridpts, arma::fill::zeros);
+  arma::colvec nu(k, arma::fill::zeros);
+  
+  B1 = bcube.slice(0);
+  for (int i = 0; i < ngridpts; ++i) {
+    arma::mat B1F2;
+    if (flag_restart_opt == 1) {
+      // Reset warm start when lambda1 jumps back up (new lambda2 block in expand.grid)
+      if (i > 0 && gammgrid1[i] > gammgrid1[i - 1]) {
+        B1F2 = bcube.slice(i);
+      } else {
+        B1F2 = B1;
+      }
+    } else {
+      B1F2 = bcube.slice(i);
+    }
+    
+    B1 = CondatVuHLagFused(Y, Z, Zt, B1F2, p, k, gammgrid1[i], gammgrid2[i], eps, L);
+    nu = YMean2 - B1 * ZMean2;
+    bcube2.slice(i) = arma::join_horiz(nu, B1);
+  }
+  
+  return bcube2;
+}
+// IMB END
+
 // [[Rcpp::export]]
 arma::cube gamloopFista2(arma::cube bcube, const arma::mat& Y,const arma::mat& Z,const  arma::colvec gammgrid, const double eps,
                          const arma::colvec& YMean2, const arma::colvec& ZMean2, arma::mat& B1, int k, int p, double tk){
@@ -634,8 +797,58 @@ arma::cube VARLagFusedcpp(const arma::cube& beta, const arma::mat& trainY, const
 }
 // IMB END
 
+// IMB START
+// [[Rcpp::export]]
+arma::cube VARHLagFusedcpp(const arma::cube& beta, const arma::mat& trainY, const arma::mat& trainZ,
+                           const arma::colvec& lambda1, const arma::colvec& lambda2,
+                           const double& tol, const int& p,
+                           const int flag_restart_opt = 0)
+{
+  int n = trainY.n_rows;
+  int k = trainY.n_cols;
+  int g = beta.n_slices;
+  
+  if (static_cast<int>(lambda1.n_elem) != g || static_cast<int>(lambda2.n_elem) != g) {
+    Rcpp::stop("VARHLagFusedcpp: lambda1, lambda2, and beta.n_slices must have the same length.");
+  }
+  
+  // Center Y and Z to analytically remove the unpenalized intercept
+  arma::mat YMean = arma::mean(trainY);
+  arma::mat ZMean = arma::mean(trainZ.t());
+  arma::mat Y(n, k, arma::fill::zeros);
+  arma::mat trainZt = trainZ.t();
+  arma::mat Z(n, k * p, arma::fill::zeros);
+  for (int i = 0; i < n; ++i) {
+    Y.row(i) = trainY.row(i) - YMean;
+    Z.row(i) = trainZt.row(i) - ZMean;
+  }
+  Z = Z.t();
+  
+  // Compute Lipschitz constant L = lambda_max(Z * Z^T)
+  arma::vec eigval;
+  arma::mat eigvec;
+  const arma::mat Zt = Z * arma::trans(Z);
+  arma::eig_sym(eigval, eigvec, Zt);
+  double L = std::max(arma::max(eigval), 1e-12);
+  
+  arma::mat betaini1 = beta.subcube(0, 1, 0, k - 1, k * p, 0);
+  arma::cube betaini = beta.subcube(0, 1, 0, k - 1, k * p, g - 1);
+  
+  arma::cube betaout = gamloopHLagFused(betaini, Y, Z, Zt, lambda1, lambda2, tol,
+                                        YMean.t(), ZMean.t(), betaini1, k, p, L, flag_restart_opt);
+  
+  return betaout;
+}
+// IMB END
+
+// ORIGINAL START
+// cv_aux_out HVAR_cvaux_cpp(const arma::mat & Y, const arma::mat& Z, int t, const arma::colvec& gamm, const double eps, int p, const double estim,
+//                           arma::cube Phi, const int flag_restart_opt = 0){
+// ORIGINAL END
+// IMB START
 cv_aux_out HVAR_cvaux_cpp(const arma::mat & Y, const arma::mat& Z, int t, const arma::colvec& gamm, const double eps, int p, const double estim,
-                          arma::cube Phi, const int flag_restart_opt = 0){
+                          arma::cube Phi, const int flag_restart_opt = 0, const arma::colvec& gamm2 = arma::colvec()){
+  // IMB END
   
   int k = Y.n_cols;
   int g = gamm.size();
@@ -661,6 +874,11 @@ cv_aux_out HVAR_cvaux_cpp(const arma::mat & Y, const arma::mat& Z, int t, const 
   // LagFused branch for cross-validation (estim == 3)
   if(estim==3){
     Phi  = VARLagFusedcpp(Phi, trainY, trainZ, gamm, eps, p, flag_restart_opt);
+  }
+  
+  // HLagFused branch for cross-validation (estim == 5; estim == 4 reserved for LagFusedZero)
+  if(estim==5){
+    Phi  = VARHLagFusedcpp(Phi, trainY, trainZ, gamm, gamm2, eps, p, flag_restart_opt);
   }
   // IMB END
   
@@ -696,6 +914,42 @@ cv_aux_out HVAR_cvaux_cpp(const arma::mat & Y, const arma::mat& Z, int t, const 
         }
       }
       sparsity(igran) = active_transitions;
+    } else if (estim == 5) {
+      // Effective degrees of freedom for HLagFused:
+      // Partition each row into contiguous fused lag segments and count nonzero entries per segment
+      arma::mat Phi_gran = betagran.cols(1, k * p);
+      const double zero_tol = 1e-8;
+      const double fuse_tol = std::max(1e-6, 10.0 * eps);
+      int eff_df = 0;
+      for (int i = 0; i < k; ++i) {
+        int seg_start = 0;
+        for (int l = 1; l <= p; ++l) {
+          bool split = (l == p);
+          if (!split) {
+            arma::rowvec diff_lag =
+              Phi_gran.submat(i, l * k, i, (l + 1) * k - 1) -
+              Phi_gran.submat(i, (l - 1) * k, i, l * k - 1);
+            if (arma::norm(diff_lag, 2) > fuse_tol) {
+              split = true;
+            }
+          }
+          if (split) {
+            arma::rowvec seg_mean(k, arma::fill::zeros);
+            int seg_len = l - seg_start;
+            for (int m = seg_start; m < l; ++m) {
+              seg_mean += Phi_gran.submat(i, m * k, i, (m + 1) * k - 1);
+            }
+            seg_mean /= static_cast<double>(seg_len);
+            for (int j = 0; j < k; ++j) {
+              if (std::abs(seg_mean(j)) > zero_tol) {
+                eff_df += 1;
+              }
+            }
+            seg_start = l;
+          }
+        }
+      }
+      sparsity(igran) = eff_df;
     } else {
       arma::vec nz = nonzeros(betagran);
       sparsity(igran) = nz.size() - k;
@@ -713,40 +967,92 @@ cv_aux_out HVAR_cvaux_cpp(const arma::mat & Y, const arma::mat& Z, int t, const 
   return(my_cv_aux);
 }
 
-cv_aux_out HVAR_cvaux_cpp(const arma::mat & Y, const arma::mat& Z, int t, const arma::colvec& gamm, const double eps, int p, const double estim){
+// ORIGINAL START
+// cv_aux_out HVAR_cvaux_cpp(const arma::mat & Y, const arma::mat& Z, int t, const arma::colvec& gamm, const double eps, int p, const double estim){
+//   int k = Y.n_cols;
+//   int g = gamm.size();
+//   arma::cube Phi = zeros(k, k*p+1, g);
+//   return(HVAR_cvaux_cpp(Y, Z, t, gamm, eps, p, estim, Phi, 1));
+// }
+// ORIGINAL END
+// IMB START
+cv_aux_out HVAR_cvaux_cpp(const arma::mat & Y, const arma::mat& Z, int t, const arma::colvec& gamm, const double eps, int p, const double estim,
+                          const arma::colvec& gamm2 = arma::colvec()){
   int k = Y.n_cols;
   int g = gamm.size();
   arma::cube Phi = zeros(k, k*p+1, g);
-  return(HVAR_cvaux_cpp(Y, Z, t, gamm, eps, p, estim, Phi, 1));
+  return(HVAR_cvaux_cpp(Y, Z, t, gamm, eps, p, estim, Phi, 1, gamm2));
 }
+// IMB END
 
+// ORIGINAL START
+// // [[Rcpp::export]]
+// Rcpp::List HVAR_cvaux_loop_cpp(const arma::mat & Y, const arma::mat& Z, const arma::colvec& tseq, const arma::colvec& gamm, const double eps, int p, const double estim){
+//
+//   // int k = Y.n_cols;
+//   int tlength = tseq.size();
+//   int g = gamm.size();
+//   Rcpp::List myList;
+//   arma::mat MSFEcv = zeros(tlength, g);
+//   arma::mat sparsitycv = zeros(tlength, g);
+//   cv_aux_out get_cv_out;
+//
+//   for(int it = 0; it < tlength; it++){
+//     if (it == 0){
+//       get_cv_out = HVAR_cvaux_cpp(Y,  Z, tseq[it], gamm,  eps, p, estim);
+//     }
+//     else {
+//       get_cv_out = HVAR_cvaux_cpp(Y,  Z, tseq[it], gamm,  eps, p, estim, get_cv_out.Phi);
+//     }
+//     MSFEcv.submat(it, 0, it, g-1) = get_cv_out.MSFEs;
+//     sparsitycv.submat(it, 0, it, g-1) = get_cv_out.sparsity;
+//   }
+//
+//   Rcpp::List results=Rcpp::List::create(
+//     Rcpp::Named("MSFEcv") = MSFEcv,
+//     Rcpp::Named("sparsitycv") = sparsitycv);
+//   return(results);
+// }
+// ORIGINAL END
+// IMB START
 // [[Rcpp::export]]
-Rcpp::List HVAR_cvaux_loop_cpp(const arma::mat & Y, const arma::mat& Z, const arma::colvec& tseq, const arma::colvec& gamm, const double eps, int p, const double estim){
-
+Rcpp::List HVAR_cvaux_loop_cpp(const arma::mat & Y, const arma::mat& Z, const arma::colvec& tseq, const arma::colvec& gamm, const double eps, int p, const double estim,
+                               Rcpp::Nullable<Rcpp::NumericVector> gamm2 = R_NilValue){
+  
   // int k = Y.n_cols;
   int tlength = tseq.size();
   int g = gamm.size();
+  arma::colvec gamm2_vec;
+  if (gamm2.isNotNull()) {
+    Rcpp::NumericVector g2_r(gamm2);
+    gamm2_vec = Rcpp::as<arma::colvec>(g2_r);
+  }
+  if (estim == 5 && static_cast<int>(gamm2_vec.n_elem) != g) {
+    Rcpp::stop("HVAR_cvaux_loop_cpp: gamm2 must be provided with the same length as gamm when estim == 5.");
+  }
+  
   Rcpp::List myList;
   arma::mat MSFEcv = zeros(tlength, g);
   arma::mat sparsitycv = zeros(tlength, g);
   cv_aux_out get_cv_out;
-
+  
   for(int it = 0; it < tlength; it++){
     if (it == 0){
-      get_cv_out = HVAR_cvaux_cpp(Y,  Z, tseq[it], gamm,  eps, p, estim);
+      get_cv_out = HVAR_cvaux_cpp(Y, Z, tseq[it], gamm, eps, p, estim, gamm2_vec);
     }
     else {
-      get_cv_out = HVAR_cvaux_cpp(Y,  Z, tseq[it], gamm,  eps, p, estim, get_cv_out.Phi);
+      get_cv_out = HVAR_cvaux_cpp(Y, Z, tseq[it], gamm, eps, p, estim, get_cv_out.Phi, 0, gamm2_vec);
     }
     MSFEcv.submat(it, 0, it, g-1) = get_cv_out.MSFEs;
     sparsitycv.submat(it, 0, it, g-1) = get_cv_out.sparsity;
   }
-
+  
   Rcpp::List results=Rcpp::List::create(
     Rcpp::Named("MSFEcv") = MSFEcv,
     Rcpp::Named("sparsitycv") = sparsitycv);
   return(results);
 }
+// IMB END
 
 
 prox_out proxHVAR_cpp(const arma::mat& Ydata, const arma::mat& Zdata, const arma::mat& Xdata,
